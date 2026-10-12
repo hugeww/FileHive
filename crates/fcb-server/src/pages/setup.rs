@@ -206,7 +206,8 @@ pub async fn setup_post_handler(
     let mut update_json = json!({
         "admin_token": hashed_pass,
         "jwt_secret": jwt_secret,
-        "name": site_name
+        "name": site_name,
+        "show_admin_addr": 1
     });
 
     if let Some(styles) = payload.expire_style {

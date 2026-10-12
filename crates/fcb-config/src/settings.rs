@@ -158,7 +158,7 @@ impl Default for SystemSettings {
             server_workers: 1,
             server_host: "0.0.0.0".to_string(),
             server_port: 12345,
-            show_admin_addr: 0,
+            show_admin_addr: 1,
             robots_text: "User-agent: *\nDisallow: /".to_string(),
             trusted_proxies: vec![],
             chunk_expire_hours: 24,
