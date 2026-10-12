@@ -1,0 +1,82 @@
+# FileCodeBox - Rust Edition (`filecodebox-rs`)
+
+基于 **Axum + SQLx + Apache OpenDAL + Tokio** 的 FileCodeBox 高性能原位平替实现。
+
+---
+
+## 架构概览
+
+本项目采用 **Cargo Workspace** 多 Crate 分层架构设计，实现了模块化、高解耦与高内聚：
+
+```
+filecodebox-rs/
+├── Cargo.toml                  # Workspace 顶级清单
+├── crates/
+│   ├── fcb-core/               # 基础类型、统一定义 (APIResponse, ErrorResponse, AppError, 版本常量)
+│   ├── fcb-storage/            # 基于 Apache OpenDAL 的统一多存储驱动 (Local, S3, WebDAV, OneDrive)
+│   ├── fcb-db/                 # SQLite 异步连接池 (WAL模式、busy_timeout、自动迁移与 CRUD 辅助)
+│   ├── fcb-security/           # scrypt 密码哈希兼容、JWT 鉴权、出站 SSRF 防御
+│   ├── fcb-config/             # 基于 ArcSwap 的零锁配置热更新、内存滑动窗口 IP 限流、配额管理
+│   └── fcb-server/             # Axum 业务服务 (分发 /share, /chunk, /presign, /admin, /mcp, /setup)
+```
+
+---
+
+## 核心特性与技术亮点
+
+1. **原位平替与数据 100% 兼容**：
+   - 数据表结构完全兼容原版 SQLite `filecodebox.db` (`filecodes`, `uploadchunk`, `keyvalue`, `presignuploadsession`, `storagereservation`)。
+   - 密码验证严格复现 Python `scrypt$16384$8$1${salt}${hash}` 格式，存量实例更换为 Rust 二进制后可无缝平滑升级，无需重置密码。
+2. **零锁配置管理 (`arc_swap`)**：
+   - 读请求完全无锁，管理员修改配置时通过 `ArcSwap` 原子替换全局配置指针，避免读写锁争用。
+3. **原生跨存储支持 (`Apache OpenDAL`)**：
+   - 彻底废除多套孤立驱动，直接依托 Rust 生态最强大的存储抽象引擎，无缝覆盖本地存储、AWS S3、MinIO、WebDAV 与 OneDrive。
+4. **极低内存占用与单二进制分发**：
+   - 内存占用从 Python 运行时的 150MB~200MB 下降至 10MB~20MB。
+   - 可直接独立运行，或通过 `Dockerfile-rs` 编译进轻量容器。
+
+---
+
+## 构建与运行
+
+### 1. 本地编译与测试
+```bash
+# 进入工作空间
+cd filecodebox-rs
+
+# 运行全套单元测试
+cargo test --workspace
+
+# 编译服务器二进制
+cargo build --release -p fcb-server
+```
+
+### 2. 启动服务
+```bash
+# 环境变量
+export PORT=12345
+export HOST="0.0.0.0"
+export DATABASE_URL="data/filecodebox.db"
+
+# 启动二进制
+./target/release/fcb-server
+```
+
+---
+
+## 接口覆盖度清单
+
+| 路由前缀 | 主要功能 | 状态 |
+| :--- | :--- | :--- |
+| `/share/text/` | 文本分享上传 | ✅ 已实现 |
+| `/share/file/` | 文件分发上传 (Multipart) | ✅ 已实现 |
+| `/share/select/` | 取件码解析与取件 | ✅ 已实现 |
+| `/share/download` | 文件下载与验签 | ✅ 已实现 |
+| `/share/metadata/` | 元数据只读查询 | ✅ 已实现 |
+| `/chunk/*` | 分片上传初始化、上传分片、合并与取消 | ✅ 已实现 |
+| `/presign/*` | S3 预签名直传与代理上传初始化 | ✅ 已实现 |
+| `/admin/*` | 管理后台鉴权、仪表盘、文件列表、批量删除、配置热更、本地路径挂载 | ✅ 已实现 |
+| `/mcp` | Model Context Protocol AI 智能体集成接口 | ✅ 已实现 |
+| `/setup` | 首次部署系统初始化向导 | ✅ 已实现 |
+| `/` & `/assets/*` | 前端单页应用 (SPA) 动态注入与静态托管 | ✅ 已实现 |
+| `/health` | 服务健康检查 | ✅ 已实现 |

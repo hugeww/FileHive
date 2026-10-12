@@ -1,0 +1,20 @@
+[package]
+name = "fcb-config"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+fcb-core = { workspace = true }
+fcb-db = { workspace = true }
+sqlx = { workspace = true }
+arc-swap = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+ipnet = { workspace = true }
