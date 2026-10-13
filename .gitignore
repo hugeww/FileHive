@@ -1,5 +1,7 @@
 /target
 /data
+frontend/node_modules
+frontend/dist
 **/*.rs.bk
 *.log
 .DS_Store
