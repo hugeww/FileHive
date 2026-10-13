@@ -639,6 +639,7 @@ name = "fcb-storage"
 version = "2.8.2"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "async-trait",
  "bytes",
  "fcb-core",

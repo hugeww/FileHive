@@ -14,7 +14,7 @@ use std::sync::Arc;
 use axum::{middleware::from_fn_with_state, Router};
 use fcb_config::{ConfigManager, RateLimiter};
 use fcb_db::init_pool;
-use fcb_storage::{FileStorage, StorageConfig};
+use fcb_storage::FileStorage;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -50,7 +50,8 @@ async fn main() -> anyhow::Result<()> {
 
     let rate_limiter = Arc::new(RateLimiter::new(config_mgr.settings_arc()));
 
-    let storage_cfg = StorageConfig::default();
+    let settings = config_mgr.get();
+    let storage_cfg = state::storage_config_from_settings(&settings);
     let storage = FileStorage::new(&storage_cfg)?;
 
     let app_state = AppState {

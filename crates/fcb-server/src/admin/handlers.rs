@@ -709,8 +709,18 @@ pub async fn config_update_handler(
         }
     }
 
-    let updated = state.config.update(payload).await?;
-    let val = serde_json::to_value(&updated).map_err(|e| AppError::Internal(e.to_string()))?;
+    state.config.update(payload).await?;
+    let updated = state.config.get();
+
+    // 动态热更新底层存储引擎（支持运行时切换为 S3/MinIO、WebDAV 或 Local）
+    let new_storage_cfg = crate::state::storage_config_from_settings(&updated);
+    if let Err(e) = state.storage.update(&new_storage_cfg) {
+        tracing::warn!("Failed to reconfigure storage dynamically: {}", e);
+    } else {
+        tracing::info!("Storage dynamically reconfigured: {:?}", updated.file_storage);
+    }
+
+    let val = serde_json::to_value(&*updated).map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(Json(APIResponse::success(val)))
 }
 

@@ -1,15 +1,17 @@
+use arc_swap::ArcSwap;
 use bytes::Bytes;
 use fcb_core::AppError;
 use opendal::{services, Operator};
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::config::StorageConfig;
 
-/// OpenDAL 统一文件存储驱动
+/// OpenDAL 统一文件存储驱动（支持运行时零锁热切换）
 #[derive(Clone)]
 pub struct StorageDriver {
-    operator: Operator,
-    config: StorageConfig,
+    operator: Arc<ArcSwap<Operator>>,
+    config: Arc<ArcSwap<StorageConfig>>,
 }
 
 /// 兼容别名
@@ -54,8 +56,8 @@ impl StorageDriver {
     pub fn new(config: &StorageConfig) -> Result<Self, AppError> {
         let operator = Self::build_operator(config)?;
         Ok(Self {
-            operator,
-            config: config.clone(),
+            operator: Arc::new(ArcSwap::from_pointee(operator)),
+            config: Arc::new(ArcSwap::from_pointee(config.clone())),
         })
     }
 
@@ -64,14 +66,22 @@ impl StorageDriver {
         Self::new(&config)
     }
 
-    /// 获取底层 OpenDAL Operator 引用
-    pub fn operator(&self) -> &Operator {
-        &self.operator
+    /// 运行时热更新存储配置与底层驱动
+    pub fn update(&self, config: &StorageConfig) -> Result<(), AppError> {
+        let op = Self::build_operator(config)?;
+        self.operator.store(Arc::new(op));
+        self.config.store(Arc::new(config.clone()));
+        Ok(())
     }
 
-    /// 获取当前存储配置引用
-    pub fn config(&self) -> &StorageConfig {
-        &self.config
+    /// 获取底层 OpenDAL Operator 守卫
+    pub fn operator(&self) -> arc_swap::Guard<Arc<Operator>> {
+        self.operator.load()
+    }
+
+    /// 获取当前存储配置守卫
+    pub fn config(&self) -> arc_swap::Guard<Arc<StorageConfig>> {
+        self.config.load()
     }
 
     /// 构建底层 OpenDAL Operator
@@ -163,10 +173,8 @@ impl StorageDriver {
                 }
                 let token = if !access_token.is_empty() {
                     access_token.as_str()
-                } else if !refresh_token.is_empty() {
-                    refresh_token.as_str()
                 } else {
-                    ""
+                    refresh_token.as_str()
                 };
                 if !token.is_empty() {
                     builder = builder.access_token(token);
@@ -191,9 +199,9 @@ impl StorageDriver {
         content_type: Option<&str>,
     ) -> Result<(), AppError> {
         let clean_path = path.trim_start_matches('/');
+        let op = self.operator.load();
         if let Some(ct) = content_type {
-            self.operator
-                .write_with(clean_path, data)
+            op.write_with(clean_path, data)
                 .content_type(ct)
                 .await
                 .map_err(|e| AppError::StorageError {
@@ -201,8 +209,7 @@ impl StorageDriver {
                     detail: format!("Failed to write file {}: {}", path, e),
                 })?;
         } else {
-            self.operator
-                .write(clean_path, data)
+            op.write(clean_path, data)
                 .await
                 .map_err(|e| AppError::StorageError {
                     status_code: 500,
@@ -222,6 +229,7 @@ impl StorageDriver {
         let clean_path = path.trim_start_matches('/');
         let buf = self
             .operator
+            .load()
             .read(clean_path)
             .await
             .map_err(|e| match e.kind() {
@@ -244,6 +252,7 @@ impl StorageDriver {
         let clean_path = path.trim_start_matches('/');
         let r = self
             .operator
+            .load()
             .reader(clean_path)
             .await
             .map_err(|e| match e.kind() {
@@ -265,6 +274,7 @@ impl StorageDriver {
     pub async fn delete_file(&self, path: &str) -> Result<(), AppError> {
         let clean_path = path.trim_start_matches('/');
         self.operator
+            .load()
             .delete(clean_path)
             .await
             .map_err(|e| AppError::StorageError {
@@ -283,6 +293,7 @@ impl StorageDriver {
     pub async fn file_exists(&self, path: &str) -> Result<bool, AppError> {
         let clean_path = path.trim_start_matches('/');
         self.operator
+            .load()
             .exists(clean_path)
             .await
             .map_err(|e| AppError::StorageError {
@@ -367,6 +378,7 @@ impl StorageDriver {
         let clean_target = target_path.trim_start_matches('/');
         let mut writer = self
             .operator
+            .load()
             .writer(clean_target)
             .await
             .map_err(|e| AppError::StorageError {
@@ -397,27 +409,36 @@ impl StorageDriver {
     /// 清理 upload_id 对应的所有分片文件
     pub async fn delete_chunks(&self, upload_id: &str) -> Result<(), AppError> {
         let prefix = format!("chunks/{}/", upload_id);
-        let _ = self.operator.remove_all(&prefix).await;
-        let prefix_no_slash = format!("chunks/{}", upload_id);
-        let _ = self.operator.remove_all(&prefix_no_slash).await;
+        self.operator
+            .load()
+            .remove_all(&prefix)
+            .await
+            .map_err(|e| AppError::StorageError {
+                status_code: 500,
+                detail: format!("Failed to remove chunks for upload_id {}: {}", upload_id, e),
+            })?;
         Ok(())
     }
 
-    /// 清理指定目录结构下的分片文件
+    /// 针对特定 save_path 深度清理分片
     pub async fn delete_chunks_at(&self, upload_id: &str, save_path: &str) -> Result<(), AppError> {
-        let clean_save = save_path.trim_start_matches('/');
-        let p = Path::new(clean_save);
-        if let Some(parent) = p.parent() {
-            let parent_str = parent.to_string_lossy();
-            if !parent_str.is_empty() && parent_str != "." {
-                let dir = format!("{}/chunks/{}/", parent_str, upload_id);
-                let _ = self.operator.remove_all(&dir).await;
+        let _ = self.delete_chunks(upload_id).await;
+
+        if !save_path.is_empty() {
+            let clean_save = save_path.trim_start_matches('/');
+            let p = Path::new(clean_save);
+            if let Some(parent) = p.parent() {
+                let parent_str = parent.to_string_lossy();
+                if !parent_str.is_empty() && parent_str != "." {
+                    let sub_prefix = format!("{}/chunks/{}/", parent_str, upload_id);
+                    let _ = self.operator.load().remove_all(&sub_prefix).await;
+                }
             }
         }
-        self.delete_chunks(upload_id).await
+        Ok(())
     }
 
-    /// 生成预签名上传 URL（S3等支持的后端返回预签名URL，不支持则返回 None）
+    /// 生成预签名上传 URL（S3 存储后端支持）
     pub async fn generate_presigned_upload_url(
         &self,
         path: &str,
@@ -425,13 +446,9 @@ impl StorageDriver {
     ) -> Result<Option<String>, AppError> {
         let clean_path = path.trim_start_matches('/');
         let duration = std::time::Duration::from_secs(expires_in_secs);
-        match self.operator.presign_write(clean_path, duration).await {
-            Ok(req) => Ok(Some(req.uri().to_string())),
-            Err(e) if e.kind() == opendal::ErrorKind::Unsupported => Ok(None),
-            Err(e) => {
-                tracing::warn!("Failed to generate presigned upload url: {}", e);
-                Ok(None)
-            }
+        match self.operator.load().presign_write(clean_path, duration).await {
+            Ok(signed_req) => Ok(Some(signed_req.uri().to_string())),
+            Err(_) => Ok(None),
         }
     }
 }
