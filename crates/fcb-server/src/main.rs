@@ -23,6 +23,8 @@ use crate::state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let _ = dotenvy::dotenv();
+
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -31,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    info!("Starting FileCodeBox (Rust edition)...");
+    info!("Starting FileHive (Rust edition)...");
 
     let db_path = std::env::var("DATABASE_URL").unwrap_or_else(|_| "data/filecodebox.db".to_string());
     if !db_path.contains("://") && db_path != ":memory:" {

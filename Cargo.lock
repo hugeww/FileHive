@@ -607,6 +607,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "dotenvy",
  "fcb-config",
  "fcb-core",
  "fcb-db",

@@ -50,6 +50,7 @@ base64 = "0.22"
 rust-embed = "8.5"
 http = "1.2"
 
+dotenvy = "0.15"
 fcb-core = { path = "crates/fcb-core" }
 fcb-storage = { path = "crates/fcb-storage" }
 fcb-db = { path = "crates/fcb-db" }
