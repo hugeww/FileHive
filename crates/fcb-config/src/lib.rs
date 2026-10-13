@@ -40,7 +40,7 @@ mod tests {
         let config_mgr = ConfigManager::new(pool.clone());
         config_mgr.load_from_db().await.unwrap();
 
-        assert_eq!(config_mgr.get().name, "文件快递柜 - FileCodeBox");
+        assert_eq!(config_mgr.get().name, "文件蜂巢 - FileHive");
 
         config_mgr
             .update(json!({

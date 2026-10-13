@@ -96,7 +96,7 @@ export const REGEX_PATTERNS = {
 
 // 默认配置
 export const DEFAULT_CONFIG = {
-  name: 'FileCodeBox',
-  description: '文件传输工具',
+  name: '文件蜂巢 - FileHive',
+  description: '像取快递一样取文件 · 基于 Rust 的极速轻量文件暂存系统',
   allowed_file_types: ['*'] as string[]
 }

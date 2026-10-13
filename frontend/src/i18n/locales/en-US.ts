@@ -47,8 +47,8 @@ export default {
     hour: 'hour',
     day: 'day',
     times: 'times',
-    appName: 'FileCodeBox - File Transfer',
-    appDescription: 'Ready-to-use file transfer system'
+    appName: 'FileHive - File Transfer',
+    appDescription: 'Like picking up a package · Fast and lightweight file sharing powered by Rust'
   },
 
   // Admin module

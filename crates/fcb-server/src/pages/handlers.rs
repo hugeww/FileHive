@@ -191,7 +191,7 @@ fn default_html() -> String {
     <div class="box">
         <h1>{{title}}</h1>
         <p>{{description}}</p>
-        <div>FileCodeBox-rs 已经就绪并正常运行</div>
+        <div>FileHive 已经就绪并正常运行</div>
     </div>
 </body>
 </html>"#

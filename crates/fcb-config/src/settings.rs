@@ -89,12 +89,12 @@ impl Default for SystemSettings {
             file_storage: "local".to_string(),
             storage_path: "".to_string(),
             storage_limit: 0,
-            name: "文件快递柜 - FileCodeBox".to_string(),
-            description: "开箱即用的文件快传系统".to_string(),
+            name: "文件蜂巢 - FileHive".to_string(),
+            description: "像取快递一样取文件 · 基于 Rust 的极速轻量文件暂存系统".to_string(),
             notify_title: "系统通知".to_string(),
-            notify_content: "欢迎使用 FileCodeBox，本程序开源于 <a href=\"https://github.com/vastsa/FileCodeBox\" target=\"_blank\">Github</a> ，欢迎Star和Fork。".to_string(),
+            notify_content: "欢迎使用 FileHive 文件蜂巢。".to_string(),
             page_explain: "请勿上传或分享违法内容。根据《中华人民共和国网络安全法》、《中华人民共和国刑法》、《中华人民共和国治安管理处罚法》等相关规定。 传播或存储违法、违规内容，会受到相关处罚，严重者将承担刑事责任。本站坚决配合相关部门，确保网络内容的安全，和谐，打造绿色网络环境。".to_string(),
-            keywords: "FileCodeBox, 文件快递柜, 口令传送箱, 匿名口令分享文本, 文件".to_string(),
+            keywords: "FileHive, 文件蜂巢, 提取码, 口令传送, 匿名分享, 极速文件柜".to_string(),
             s3_access_key_id: "".to_string(),
             s3_secret_access_key: "".to_string(),
             s3_bucket_name: "".to_string(),
@@ -274,7 +274,7 @@ mod tests {
         let settings = SystemSettings::default();
         assert_eq!(settings.file_storage, "local");
         assert_eq!(settings.storage_limit, 0);
-        assert_eq!(settings.name, "文件快递柜 - FileCodeBox");
+        assert_eq!(settings.name, "文件蜂巢 - FileHive");
         assert_eq!(settings.upload_count, 10);
         assert_eq!(settings.upload_minute, 1);
         assert_eq!(settings.login_count, 5);
@@ -303,7 +303,7 @@ mod tests {
         let pool = fcb_db::init_pool(":memory:").await.unwrap();
 
         let manager = ConfigManager::new(pool.clone());
-        assert_eq!(manager.get().name, "文件快递柜 - FileCodeBox");
+        assert_eq!(manager.get().name, "文件蜂巢 - FileHive");
 
         // 更新配置
         let update_val = serde_json::json!({

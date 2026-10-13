@@ -44,7 +44,7 @@ fn tool_definitions() -> Value {
     json!([
         {
             "name": "share_text",
-            "description": "将文本快速上传到 FileCodeBox 并创建分享链接。",
+            "description": "将文本快速上传到 FileHive 并创建分享链接。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -57,7 +57,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "share_file",
-            "description": "将 Base64 编码的文件上传到 FileCodeBox 并创建分享链接。",
+            "description": "将 Base64 编码的文件上传到 FileHive 并创建分享链接。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -95,7 +95,7 @@ pub async fn mcp_handler(
             json!({
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": { "tools": { "listChanged": false } },
-                "serverInfo": { "name": "filecodebox", "version": "1.0.0" }
+                "serverInfo": { "name": "filehive", "version": "1.0.0" }
             }),
         ),
         "ping" => jsonrpc_result(id, json!({})),

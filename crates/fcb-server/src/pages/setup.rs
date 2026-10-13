@@ -44,7 +44,7 @@ pub fn render_setup_page(error: Option<&str>, site_name: &str) -> String {
     };
 
     let safe_site_name = escape_html(if site_name.is_empty() {
-        "文件快递柜 - FileCodeBox"
+        "文件蜂巢 - FileHive"
     } else {
         site_name
     });
@@ -54,7 +54,7 @@ pub fn render_setup_page(error: Option<&str>, site_name: &str) -> String {
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>FileCodeBox - 初始化向导</title>
+    <title>FileHive - 初始化向导</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }}
         .card {{ background: white; padding: 32px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); width: 100%; max-width: 440px; }}
@@ -68,7 +68,7 @@ pub fn render_setup_page(error: Option<&str>, site_name: &str) -> String {
 </head>
 <body>
     <div class="card">
-        <h2>FileCodeBox 系统初始化</h2>
+        <h2>FileHive 系统初始化</h2>
         {}
         <form method="POST" action="/setup">
             <div class="form-group">
@@ -178,7 +178,7 @@ pub async fn setup_post_handler(
 
     let site_name = payload
         .site_name
-        .unwrap_or_else(|| "文件快递柜 - FileCodeBox".to_string());
+        .unwrap_or_else(|| "文件蜂巢 - FileHive".to_string());
 
     let pass = payload.admin_password.unwrap_or_default().trim().to_string();
     let confirm = payload.confirm_password.unwrap_or_default().trim().to_string();
@@ -229,7 +229,7 @@ pub async fn setup_post_handler(
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>初始化完成 - FileCodeBox</title>
+    <title>初始化完成 - FileHive</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
         .card { background: white; padding: 36px 32px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); width: 100%; max-width: 440px; text-align: center; }

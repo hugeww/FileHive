@@ -47,8 +47,8 @@ export default {
     hour: '小时',
     day: '天',
     times: '次',
-    appName: '文件快递柜 - FileCodeBox',
-    appDescription: '开箱即用的文件快传系统'
+    appName: '文件蜂巢 - FileHive',
+    appDescription: '像取快递一样取文件 · 基于 Rust 的极速轻量文件暂存系统'
   },
 
   // 管理员模块
