@@ -34,8 +34,12 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting FileCodeBox (Rust edition)...");
 
     let db_path = std::env::var("DATABASE_URL").unwrap_or_else(|_| "data/filecodebox.db".to_string());
-    if let Some(parent) = std::path::Path::new(&db_path).parent() {
-        let _ = std::fs::create_dir_all(parent);
+    if !db_path.contains("://") && db_path != ":memory:" {
+        if let Some(parent) = std::path::Path::new(&db_path).parent() {
+            if !parent.as_os_str().is_empty() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
     }
 
     let pool = init_pool(&db_path).await?;

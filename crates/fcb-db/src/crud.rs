@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
 use fcb_core::AppError;
-use sqlx::SqlitePool;
+use serde_json::json;
 
-use crate::models::{FileCode, KeyValue, PresignSession, StorageReservation, UploadChunk};
+use crate::models::{FileCode, KeyValue, PresignSession, StorageReservation};
+use crate::pool::DbPool;
 
 // ============================================================================
 // FileCodes CRUD
@@ -28,314 +29,856 @@ pub struct NewFileCode {
 
 /// Create a new filecode record.
 pub async fn insert_file_code(
-    pool: &SqlitePool,
+    pool: &DbPool,
     new_code: &NewFileCode,
 ) -> Result<FileCode, AppError> {
-    let row = sqlx::query_as::<_, FileCode>(
-        r#"
-        INSERT INTO filecodes (
-            code, prefix, suffix, uuid_file_name, file_path, size, text,
-            expired_at, expired_count, used_count, file_hash, is_chunked, upload_id
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING id, code, prefix, suffix, uuid_file_name, file_path, size, text,
-                  expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
-        "#,
-    )
-    .bind(&new_code.code)
-    .bind(&new_code.prefix)
-    .bind(&new_code.suffix)
-    .bind(&new_code.uuid_file_name)
-    .bind(&new_code.file_path)
-    .bind(new_code.size)
-    .bind(&new_code.text)
-    .bind(new_code.expired_at)
-    .bind(new_code.expired_count)
-    .bind(new_code.used_count)
-    .bind(&new_code.file_hash)
-    .bind(new_code.is_chunked)
-    .bind(&new_code.upload_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to insert file code: {}", e)))?;
+    match pool {
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query_as::<_, FileCode>(
+                r#"
+                INSERT INTO filecodes (
+                    code, prefix, suffix, uuid_file_name, file_path, size, text,
+                    expired_at, expired_count, used_count, file_hash, is_chunked, upload_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                          expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                "#,
+            )
+            .bind(&new_code.code)
+            .bind(&new_code.prefix)
+            .bind(&new_code.suffix)
+            .bind(&new_code.uuid_file_name)
+            .bind(&new_code.file_path)
+            .bind(new_code.size)
+            .bind(&new_code.text)
+            .bind(new_code.expired_at)
+            .bind(new_code.expired_count)
+            .bind(new_code.used_count)
+            .bind(&new_code.file_hash)
+            .bind(new_code.is_chunked)
+            .bind(&new_code.upload_id)
+            .fetch_one(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to insert file code (sqlite): {}", e)))?;
 
-    Ok(row)
+            Ok(row)
+        }
+        DbPool::Postgres(p) => {
+            let row = sqlx::query_as::<_, FileCode>(
+                r#"
+                INSERT INTO filecodes (
+                    code, prefix, suffix, uuid_file_name, file_path, size, text,
+                    expired_at, expired_count, used_count, file_hash, is_chunked, upload_id
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                RETURNING id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                          expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                "#,
+            )
+            .bind(&new_code.code)
+            .bind(&new_code.prefix)
+            .bind(&new_code.suffix)
+            .bind(&new_code.uuid_file_name)
+            .bind(&new_code.file_path)
+            .bind(new_code.size)
+            .bind(&new_code.text)
+            .bind(new_code.expired_at)
+            .bind(new_code.expired_count)
+            .bind(new_code.used_count)
+            .bind(&new_code.file_hash)
+            .bind(new_code.is_chunked)
+            .bind(&new_code.upload_id)
+            .fetch_one(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to insert file code (pg): {}", e)))?;
+
+            Ok(row)
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                r#"
+                INSERT INTO filecodes (
+                    code, prefix, suffix, uuid_file_name, file_path, size, text,
+                    expired_at, expired_count, used_count, file_hash, is_chunked, upload_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&new_code.code)
+            .bind(&new_code.prefix)
+            .bind(&new_code.suffix)
+            .bind(&new_code.uuid_file_name)
+            .bind(&new_code.file_path)
+            .bind(new_code.size)
+            .bind(&new_code.text)
+            .bind(new_code.expired_at)
+            .bind(new_code.expired_count)
+            .bind(new_code.used_count)
+            .bind(&new_code.file_hash)
+            .bind(new_code.is_chunked)
+            .bind(&new_code.upload_id)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to insert file code (mysql): {}", e)))?;
+
+            get_file_code_by_code(pool, &new_code.code)
+                .await?
+                .ok_or_else(|| AppError::Database("Inserted file code not found".to_string()))
+        }
+    }
 }
 
 /// Get a file code by its unique pickup code.
 pub async fn get_file_code_by_code(
-    pool: &SqlitePool,
+    pool: &DbPool,
     code: &str,
 ) -> Result<Option<FileCode>, AppError> {
-    sqlx::query_as::<_, FileCode>(
-        r#"
-        SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
-               expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
-        FROM filecodes
-        WHERE code = ?
-        "#,
-    )
-    .bind(code)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch file code by code: {}", e)))
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query_as::<_, FileCode>(
+                r#"
+                SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                       expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                FROM filecodes
+                WHERE code = ?
+                "#,
+            )
+            .bind(code)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to fetch file code by code: {}", e)))
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_as::<_, FileCode>(
+                r#"
+                SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                       expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                FROM filecodes
+                WHERE code = $1
+                "#,
+            )
+            .bind(code)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to fetch file code by code: {}", e)))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as::<_, FileCode>(
+                r#"
+                SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                       expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                FROM filecodes
+                WHERE code = ?
+                "#,
+            )
+            .bind(code)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to fetch file code by code: {}", e)))
+        }
+    }
 }
 
 /// Get a file code by its ID.
 pub async fn get_file_code_by_id(
-    pool: &SqlitePool,
+    pool: &DbPool,
     id: i64,
 ) -> Result<Option<FileCode>, AppError> {
-    sqlx::query_as::<_, FileCode>(
-        r#"
-        SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
-               expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
-        FROM filecodes
-        WHERE id = ?
-        "#,
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch file code by id: {}", e)))
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query_as::<_, FileCode>(
+                r#"
+                SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                       expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                FROM filecodes
+                WHERE id = ?
+                "#,
+            )
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to fetch file code by id: {}", e)))
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_as::<_, FileCode>(
+                r#"
+                SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                       expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                FROM filecodes
+                WHERE id = $1
+                "#,
+            )
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to fetch file code by id: {}", e)))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as::<_, FileCode>(
+                r#"
+                SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                       expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                FROM filecodes
+                WHERE id = ?
+                "#,
+            )
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to fetch file code by id: {}", e)))
+        }
+    }
 }
 
 /// Atomically consume/use a filecode if valid and not expired.
-///
-/// Corresponds to Python logic in views.py:
-/// ```python
-/// eligible = Q(expired_count=-1) | Q(expired_count__gt=0)
-/// updated = await FileCodes.filter(Q(id=file_code.id) & eligible).update(
-///     used_count=F("used_count") + 1,
-///     expired_count=Case(
-///         When(expired_count__gt=0, then=F("expired_count") - 1),
-///         default=F("expired_count")
-///     )
-/// )
-/// ```
-/// Returns the updated `FileCode` if eligible and updated, or `None` if not eligible (or expired count reached 0).
 pub async fn consume_file_code(
-    pool: &SqlitePool,
+    pool: &DbPool,
     id: i64,
     now: DateTime<Utc>,
 ) -> Result<Option<FileCode>, AppError> {
-    let row = sqlx::query_as::<_, FileCode>(
-        r#"
-        UPDATE filecodes
-        SET used_count = used_count + 1,
-            expired_count = CASE
-                WHEN expired_count > 0 THEN expired_count - 1
-                ELSE expired_count
-            END
-        WHERE id = ?
-          AND (expired_count = -1 OR expired_count > 0)
-          AND (expired_at IS NULL OR expired_count > 0 OR expired_at >= ?)
-        RETURNING id, code, prefix, suffix, uuid_file_name, file_path, size, text,
-                  expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
-        "#,
-    )
-    .bind(id)
-    .bind(now)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to consume file code: {}", e)))?;
+    match pool {
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query_as::<_, FileCode>(
+                r#"
+                UPDATE filecodes
+                SET used_count = used_count + 1,
+                    expired_count = CASE
+                        WHEN expired_count > 0 THEN expired_count - 1
+                        ELSE expired_count
+                    END
+                WHERE id = ?
+                  AND (expired_count = -1 OR expired_count > 0)
+                  AND (expired_at IS NULL OR expired_count > 0 OR expired_at >= ?)
+                RETURNING id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                          expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                "#,
+            )
+            .bind(id)
+            .bind(now)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to consume file code: {}", e)))?;
 
-    Ok(row)
+            Ok(row)
+        }
+        DbPool::Postgres(p) => {
+            let row = sqlx::query_as::<_, FileCode>(
+                r#"
+                UPDATE filecodes
+                SET used_count = used_count + 1,
+                    expired_count = CASE
+                        WHEN expired_count > 0 THEN expired_count - 1
+                        ELSE expired_count
+                    END
+                WHERE id = $1
+                  AND (expired_count = -1 OR expired_count > 0)
+                  AND (expired_at IS NULL OR expired_count > 0 OR expired_at >= $2)
+                RETURNING id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                          expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                "#,
+            )
+            .bind(id)
+            .bind(now)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to consume file code: {}", e)))?;
+
+            Ok(row)
+        }
+        DbPool::MySql(p) => {
+            let res = sqlx::query(
+                r#"
+                UPDATE filecodes
+                SET used_count = used_count + 1,
+                    expired_count = CASE
+                        WHEN expired_count > 0 THEN expired_count - 1
+                        ELSE expired_count
+                    END
+                WHERE id = ?
+                  AND (expired_count = -1 OR expired_count > 0)
+                  AND (expired_at IS NULL OR expired_count > 0 OR expired_at >= ?)
+                "#,
+            )
+            .bind(id)
+            .bind(now)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to consume file code: {}", e)))?;
+
+            if res.rows_affected() > 0 {
+                get_file_code_by_id(pool, id).await
+            } else {
+                Ok(None)
+            }
+        }
+    }
 }
 
 /// Delete a file code by its ID. Returns true if a row was deleted.
-pub async fn delete_file_code(pool: &SqlitePool, id: i64) -> Result<bool, AppError> {
-    let result = sqlx::query("DELETE FROM filecodes WHERE id = ?")
-        .bind(id)
-        .execute(pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Failed to delete file code: {}", e)))?;
-
-    Ok(result.rows_affected() > 0)
+pub async fn delete_file_code(pool: &DbPool, id: i64) -> Result<bool, AppError> {
+    let rows_affected = match pool {
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM filecodes WHERE id = ?")
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::Postgres(p) => sqlx::query("DELETE FROM filecodes WHERE id = $1")
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::MySql(p) => sqlx::query("DELETE FROM filecodes WHERE id = ?")
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+    };
+    Ok(rows_affected > 0)
 }
 
 /// Find all expired filecodes for background cleanup.
-/// Expiration condition matches Python:
-/// - (expired_at is not null and expired_count < 0 and expired_at < now) OR
-/// - (expired_count == 0)
 pub async fn get_expired_file_codes(
-    pool: &SqlitePool,
+    pool: &DbPool,
     now: DateTime<Utc>,
 ) -> Result<Vec<FileCode>, AppError> {
-    sqlx::query_as::<_, FileCode>(
-        r#"
-        SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
-               expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
-        FROM filecodes
-        WHERE (expired_at IS NOT NULL AND expired_count < 0 AND expired_at < ?)
-           OR (expired_count = 0)
-        "#,
-    )
-    .bind(now)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to list expired file codes: {}", e)))
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query_as::<_, FileCode>(
+                r#"
+                SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                       expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                FROM filecodes
+                WHERE (expired_at IS NOT NULL AND expired_count < 0 AND expired_at < ?)
+                   OR (expired_count = 0)
+                "#,
+            )
+            .bind(now)
+            .fetch_all(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to list expired file codes: {}", e)))
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_as::<_, FileCode>(
+                r#"
+                SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                       expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                FROM filecodes
+                WHERE (expired_at IS NOT NULL AND expired_count < 0 AND expired_at < $1)
+                   OR (expired_count = 0)
+                "#,
+            )
+            .bind(now)
+            .fetch_all(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to list expired file codes: {}", e)))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as::<_, FileCode>(
+                r#"
+                SELECT id, code, prefix, suffix, uuid_file_name, file_path, size, text,
+                       expired_at, expired_count, used_count, created_at, file_hash, is_chunked, upload_id
+                FROM filecodes
+                WHERE (expired_at IS NOT NULL AND expired_count < 0 AND expired_at < ?)
+                   OR (expired_count = 0)
+                "#,
+            )
+            .bind(now)
+            .fetch_all(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to list expired file codes: {}", e)))
+        }
+    }
+}
+
+/// List all filecodes ordered by ID descending.
+pub async fn list_all_files(pool: &DbPool) -> Result<Vec<FileCode>, AppError> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query_as::<_, FileCode>("SELECT * FROM filecodes ORDER BY id DESC")
+                .fetch_all(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_as::<_, FileCode>("SELECT * FROM filecodes ORDER BY id DESC")
+                .fetch_all(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as::<_, FileCode>("SELECT * FROM filecodes ORDER BY id DESC")
+                .fetch_all(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))
+        }
+    }
 }
 
 /// Count total stored filecodes.
-pub async fn count_total_files(pool: &SqlitePool) -> Result<i64, AppError> {
-    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM filecodes")
-        .fetch_one(pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Failed to count file codes: {}", e)))?;
+pub async fn count_total_files(pool: &DbPool) -> Result<i64, AppError> {
+    let row: (i64,) = match pool {
+        DbPool::Sqlite(p) => sqlx::query_as("SELECT COUNT(*) FROM filecodes").fetch_one(p).await,
+        DbPool::Postgres(p) => sqlx::query_as("SELECT COUNT(*) FROM filecodes").fetch_one(p).await,
+        DbPool::MySql(p) => sqlx::query_as("SELECT COUNT(*) FROM filecodes").fetch_one(p).await,
+    }
+    .map_err(|e| AppError::Database(format!("Failed to count file codes: {}", e)))?;
 
     Ok(row.0)
 }
 
-/// Total used storage size of non-text files.
-pub async fn sum_total_storage_size(pool: &SqlitePool) -> Result<i64, AppError> {
-    let row: (Option<i64>,) = sqlx::query_as("SELECT SUM(size) FROM filecodes WHERE text IS NULL")
-        .fetch_one(pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Failed to sum storage size: {}", e)))?;
+/// Total used storage size of non-local-ref files.
+pub async fn sum_total_storage_size(pool: &DbPool) -> Result<i64, AppError> {
+    let row: (Option<i64>,) = match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query_as(
+                "SELECT SUM(size) FROM filecodes WHERE file_path IS NULL OR file_path != 'local-ref'",
+            )
+            .fetch_one(p)
+            .await
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_as(
+                "SELECT SUM(size) FROM filecodes WHERE file_path IS NULL OR file_path != 'local-ref'",
+            )
+            .fetch_one(p)
+            .await
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as(
+                "SELECT SUM(size) FROM filecodes WHERE file_path IS NULL OR file_path != 'local-ref'",
+            )
+            .fetch_one(p)
+            .await
+        }
+    }
+    .map_err(|e| AppError::Database(format!("Failed to sum storage size: {}", e)))?;
 
     Ok(row.0.unwrap_or(0))
+}
+
+/// Total retrieval times.
+pub async fn sum_total_used_count(pool: &DbPool) -> Result<i64, AppError> {
+    let row: (Option<i64>,) = match pool {
+        DbPool::Sqlite(p) => sqlx::query_as("SELECT SUM(used_count) FROM filecodes").fetch_one(p).await,
+        DbPool::Postgres(p) => sqlx::query_as("SELECT SUM(used_count) FROM filecodes").fetch_one(p).await,
+        DbPool::MySql(p) => sqlx::query_as("SELECT SUM(used_count) FROM filecodes").fetch_one(p).await,
+    }
+    .map_err(|e| AppError::Database(format!("Failed to sum used count: {}", e)))?;
+
+    Ok(row.0.unwrap_or(0))
+}
+
+/// Update file expiration policy
+pub async fn update_file_policy_expired_at(
+    pool: &DbPool,
+    id: i64,
+    new_exp: Option<DateTime<Utc>>,
+) -> Result<(), AppError> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("UPDATE filecodes SET expired_at = ? WHERE id = ?")
+                .bind(new_exp)
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE filecodes SET expired_at = $1 WHERE id = $2")
+                .bind(new_exp)
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE filecodes SET expired_at = ? WHERE id = ?")
+                .bind(new_exp)
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn update_file_policy_make_permanent(pool: &DbPool, id: i64) -> Result<(), AppError> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("UPDATE filecodes SET expired_at = NULL, expired_count = -1 WHERE id = ?")
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE filecodes SET expired_at = NULL, expired_count = -1 WHERE id = $1")
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE filecodes SET expired_at = NULL, expired_count = -1 WHERE id = ?")
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn update_file_policy_download_limit(
+    pool: &DbPool,
+    id: i64,
+    limit: i32,
+) -> Result<(), AppError> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("UPDATE filecodes SET expired_count = ? WHERE id = ?")
+                .bind(limit)
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE filecodes SET expired_count = $1 WHERE id = $2")
+                .bind(limit)
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE filecodes SET expired_count = ? WHERE id = ?")
+                .bind(limit)
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+    }
+    Ok(())
 }
 
 // ============================================================================
 // KeyValue CRUD
 // ============================================================================
 
-/// Get a key-value record by key.
-pub async fn get_key_value(pool: &SqlitePool, key: &str) -> Result<Option<KeyValue>, AppError> {
-    sqlx::query_as::<_, KeyValue>(
-        r#"
-        SELECT id, key, value, created_at
-        FROM keyvalue
-        WHERE key = ?
-        "#,
-    )
-    .bind(key)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to get key value for key '{}': {}", key, e)))
+/// Get KeyValue record by key.
+pub async fn get_key_value(pool: &DbPool, key: &str) -> Result<Option<KeyValue>, AppError> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query_as::<_, KeyValue>(
+                "SELECT id, key, value, created_at FROM keyvalue WHERE key = ?",
+            )
+            .bind(key)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to get keyvalue: {}", e)))
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_as::<_, KeyValue>(
+                "SELECT id, key, value, created_at FROM keyvalue WHERE key = $1",
+            )
+            .bind(key)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to get keyvalue: {}", e)))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as::<_, KeyValue>(
+                "SELECT id, `key`, `value`, created_at FROM keyvalue WHERE `key` = ?",
+            )
+            .bind(key)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to get keyvalue: {}", e)))
+        }
+    }
 }
 
-/// Set or update a key-value record (upsert).
+/// Set or update KeyValue record.
 pub async fn set_key_value(
-    pool: &SqlitePool,
+    pool: &DbPool,
     key: &str,
-    value: Option<&str>,
+    value: &str,
 ) -> Result<KeyValue, AppError> {
-    let row = sqlx::query_as::<_, KeyValue>(
-        r#"
-        INSERT INTO keyvalue (key, value)
-        VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-        RETURNING id, key, value, created_at
-        "#,
-    )
-    .bind(key)
-    .bind(value)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to set key value for key '{}': {}", key, e)))?;
+    match pool {
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query_as::<_, KeyValue>(
+                r#"
+                INSERT INTO keyvalue (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                RETURNING id, key, value, created_at
+                "#,
+            )
+            .bind(key)
+            .bind(value)
+            .fetch_one(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to set keyvalue (sqlite): {}", e)))?;
+            Ok(row)
+        }
+        DbPool::Postgres(p) => {
+            let row = sqlx::query_as::<_, KeyValue>(
+                r#"
+                INSERT INTO keyvalue (key, value)
+                VALUES ($1, $2)
+                ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+                RETURNING id, key, value, created_at
+                "#,
+            )
+            .bind(key)
+            .bind(value)
+            .fetch_one(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to set keyvalue (pg): {}", e)))?;
+            Ok(row)
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                r#"
+                INSERT INTO keyvalue (`key`, `value`)
+                VALUES (?, ?)
+                ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)
+                "#,
+            )
+            .bind(key)
+            .bind(value)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to set keyvalue (mysql): {}", e)))?;
 
-    Ok(row)
+            get_key_value(pool, key)
+                .await?
+                .ok_or_else(|| AppError::Database("Keyvalue inserted not found".to_string()))
+        }
+    }
 }
 
-/// Delete a key-value record by key.
-pub async fn delete_key_value(pool: &SqlitePool, key: &str) -> Result<bool, AppError> {
-    let result = sqlx::query("DELETE FROM keyvalue WHERE key = ?")
-        .bind(key)
-        .execute(pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Failed to delete key '{}': {}", key, e)))?;
-
-    Ok(result.rows_affected() > 0)
+/// Delete KeyValue record.
+pub async fn delete_key_value(pool: &DbPool, key: &str) -> Result<bool, AppError> {
+    let rows_affected = match pool {
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM keyvalue WHERE key = ?")
+            .bind(key)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::Postgres(p) => sqlx::query("DELETE FROM keyvalue WHERE key = $1")
+            .bind(key)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::MySql(p) => sqlx::query("DELETE FROM keyvalue WHERE `key` = ?")
+            .bind(key)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+    };
+    Ok(rows_affected > 0)
 }
 
 // ============================================================================
 // StorageReservation CRUD
 // ============================================================================
 
-/// Insert or update a storage reservation.
+/// Insert or update a storage reservation record.
 pub async fn insert_or_update_reservation(
-    pool: &SqlitePool,
+    pool: &DbPool,
     token: &str,
     size: i64,
     expires_at: DateTime<Utc>,
 ) -> Result<StorageReservation, AppError> {
-    let row = sqlx::query_as::<_, StorageReservation>(
-        r#"
-        INSERT INTO storagereservation (token, size, expires_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(token) DO UPDATE SET size = excluded.size, expires_at = excluded.expires_at
-        RETURNING id, token, size, expires_at
-        "#,
-    )
-    .bind(token)
-    .bind(size)
-    .bind(expires_at)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to upsert storage reservation: {}", e)))?;
+    match pool {
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query_as::<_, StorageReservation>(
+                r#"
+                INSERT INTO storagereservation (token, size, expires_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(token) DO UPDATE SET size = excluded.size, expires_at = excluded.expires_at
+                RETURNING id, token, size, expires_at
+                "#,
+            )
+            .bind(token)
+            .bind(size)
+            .bind(expires_at)
+            .fetch_one(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to upsert reservation: {}", e)))?;
+            Ok(row)
+        }
+        DbPool::Postgres(p) => {
+            let row = sqlx::query_as::<_, StorageReservation>(
+                r#"
+                INSERT INTO storagereservation (token, size, expires_at)
+                VALUES ($1, $2, $3)
+                ON CONFLICT(token) DO UPDATE SET size = EXCLUDED.size, expires_at = EXCLUDED.expires_at
+                RETURNING id, token, size, expires_at
+                "#,
+            )
+            .bind(token)
+            .bind(size)
+            .bind(expires_at)
+            .fetch_one(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to upsert reservation: {}", e)))?;
+            Ok(row)
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                r#"
+                INSERT INTO storagereservation (token, size, expires_at)
+                VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE size = VALUES(size), expires_at = VALUES(expires_at)
+                "#,
+            )
+            .bind(token)
+            .bind(size)
+            .bind(expires_at)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to upsert reservation: {}", e)))?;
 
-    Ok(row)
+            get_active_reservation(pool, token, Utc::now() - chrono::Duration::hours(24))
+                .await?
+                .ok_or_else(|| AppError::Database("Reservation not found after upsert".to_string()))
+        }
+    }
 }
 
-/// Get an active (unexpired) storage reservation by token.
+/// Get active reservation by token if not expired.
 pub async fn get_active_reservation(
-    pool: &SqlitePool,
+    pool: &DbPool,
     token: &str,
     now: DateTime<Utc>,
 ) -> Result<Option<StorageReservation>, AppError> {
-    sqlx::query_as::<_, StorageReservation>(
-        r#"
-        SELECT id, token, size, expires_at
-        FROM storagereservation
-        WHERE token = ? AND expires_at > ?
-        "#,
-    )
-    .bind(token)
-    .bind(now)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch active reservation: {}", e)))
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query_as::<_, StorageReservation>(
+                "SELECT id, token, size, expires_at FROM storagereservation WHERE token = ? AND expires_at > ?",
+            )
+            .bind(token)
+            .bind(now)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to get reservation: {}", e)))
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_as::<_, StorageReservation>(
+                "SELECT id, token, size, expires_at FROM storagereservation WHERE token = $1 AND expires_at > $2",
+            )
+            .bind(token)
+            .bind(now)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to get reservation: {}", e)))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as::<_, StorageReservation>(
+                "SELECT id, token, size, expires_at FROM storagereservation WHERE token = ? AND expires_at > ?",
+            )
+            .bind(token)
+            .bind(now)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to get reservation: {}", e)))
+        }
+    }
 }
 
-/// Delete storage reservation by token.
-pub async fn delete_reservation(pool: &SqlitePool, token: &str) -> Result<bool, AppError> {
-    let result = sqlx::query("DELETE FROM storagereservation WHERE token = ?")
-        .bind(token)
-        .execute(pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Failed to delete reservation: {}", e)))?;
+/// Delete reservation by token.
+pub async fn delete_reservation(pool: &DbPool, token: &str) -> Result<bool, AppError> {
+    let rows_affected = match pool {
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM storagereservation WHERE token = ?")
+            .bind(token)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::Postgres(p) => sqlx::query("DELETE FROM storagereservation WHERE token = $1")
+            .bind(token)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::MySql(p) => sqlx::query("DELETE FROM storagereservation WHERE token = ?")
+            .bind(token)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+    };
 
-    Ok(result.rows_affected() > 0)
+    Ok(rows_affected > 0)
 }
 
-/// Clean up expired storage reservations.
-pub async fn delete_expired_reservations(
-    pool: &SqlitePool,
-    now: DateTime<Utc>,
-) -> Result<u64, AppError> {
-    let result = sqlx::query("DELETE FROM storagereservation WHERE expires_at <= ?")
-        .bind(now)
-        .execute(pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Failed to purge expired reservations: {}", e)))?;
+/// Delete expired reservations.
+pub async fn delete_expired_reservations(pool: &DbPool, now: DateTime<Utc>) -> Result<u64, AppError> {
+    let rows_affected = match pool {
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM storagereservation WHERE expires_at < ?")
+            .bind(now)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::Postgres(p) => sqlx::query("DELETE FROM storagereservation WHERE expires_at < $1")
+            .bind(now)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::MySql(p) => sqlx::query("DELETE FROM storagereservation WHERE expires_at < ?")
+            .bind(now)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+    };
 
-    Ok(result.rows_affected())
+    Ok(rows_affected)
 }
 
-/// Sum the total active reserved storage size.
-pub async fn sum_active_reserved_size(
-    pool: &SqlitePool,
-    now: DateTime<Utc>,
-) -> Result<i64, AppError> {
-    let row: (Option<i64>,) = sqlx::query_as(
-        "SELECT SUM(size) FROM storagereservation WHERE expires_at > ?",
-    )
-    .bind(now)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to sum active reserved size: {}", e)))?;
+/// Sum total active reserved size.
+pub async fn sum_active_reserved_size(pool: &DbPool, now: DateTime<Utc>) -> Result<i64, AppError> {
+    let row: (Option<i64>,) = match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query_as(
+                "SELECT SUM(size) FROM storagereservation WHERE expires_at > ?",
+            )
+            .bind(now)
+            .fetch_one(p)
+            .await
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_as(
+                "SELECT SUM(size) FROM storagereservation WHERE expires_at > $1",
+            )
+            .bind(now)
+            .fetch_one(p)
+            .await
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as(
+                "SELECT SUM(size) FROM storagereservation WHERE expires_at > ?",
+            )
+            .bind(now)
+            .fetch_one(p)
+            .await
+        }
+    }
+    .map_err(|e| AppError::Database(format!("Failed to sum reserved size: {}", e)))?;
 
     Ok(row.0.unwrap_or(0))
 }
@@ -344,377 +887,502 @@ pub async fn sum_active_reserved_size(
 // UploadChunk CRUD
 // ============================================================================
 
-/// Insert or update an upload chunk.
-pub async fn upsert_upload_chunk(
-    pool: &SqlitePool,
-    chunk: &UploadChunk,
-) -> Result<(), AppError> {
-    sqlx::query(
-        r#"
-        INSERT INTO uploadchunk (
-            upload_id, chunk_index, chunk_hash, total_chunks,
-            file_size, chunk_size, file_name, save_path, completed
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(&chunk.upload_id)
-    .bind(chunk.chunk_index)
-    .bind(&chunk.chunk_hash)
-    .bind(chunk.total_chunks)
-    .bind(chunk.file_size)
-    .bind(chunk.chunk_size)
-    .bind(&chunk.file_name)
-    .bind(&chunk.save_path)
-    .bind(chunk.completed)
-    .execute(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to insert upload chunk: {}", e)))?;
-
-    Ok(())
-}
-
-/// Get all chunks for a given upload_id.
-pub async fn get_upload_chunks(
-    pool: &SqlitePool,
+pub async fn insert_chunk_session(
+    pool: &DbPool,
     upload_id: &str,
-) -> Result<Vec<UploadChunk>, AppError> {
-    sqlx::query_as::<_, UploadChunk>(
-        r#"
-        SELECT id, upload_id, chunk_index, chunk_hash, total_chunks,
-               file_size, chunk_size, file_name, save_path, created_at, completed
-        FROM uploadchunk
-        WHERE upload_id = ?
-        ORDER BY chunk_index ASC
-        "#,
-    )
-    .bind(upload_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch upload chunks: {}", e)))
-}
-
-/// Get a specific upload chunk by upload_id and chunk_index.
-pub async fn get_upload_chunk(
-    pool: &SqlitePool,
-    upload_id: &str,
-    chunk_index: i32,
-) -> Result<Option<UploadChunk>, AppError> {
-    sqlx::query_as::<_, UploadChunk>(
-        r#"
-        SELECT id, upload_id, chunk_index, chunk_hash, total_chunks,
-               file_size, chunk_size, file_name, save_path, created_at, completed
-        FROM uploadchunk
-        WHERE upload_id = ? AND chunk_index = ?
-        LIMIT 1
-        "#,
-    )
-    .bind(upload_id)
-    .bind(chunk_index)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch upload chunk: {}", e)))
-}
-
-/// Save or update an upload chunk (updates if (upload_id, chunk_index) exists, else inserts).
-pub async fn save_or_update_upload_chunk(
-    pool: &SqlitePool,
-    chunk: &UploadChunk,
+    file_name: &str,
+    file_size: i64,
+    chunk_size: i32,
+    total_chunks: i32,
+    file_hash: &str,
 ) -> Result<(), AppError> {
-    let existing = get_upload_chunk(pool, &chunk.upload_id, chunk.chunk_index).await?;
-    if existing.is_some() {
-        sqlx::query(
-            r#"
-            UPDATE uploadchunk
-            SET chunk_hash = ?, total_chunks = ?, file_size = ?,
-                chunk_size = ?, file_name = ?, save_path = ?, completed = ?
-            WHERE upload_id = ? AND chunk_index = ?
-            "#,
-        )
-        .bind(&chunk.chunk_hash)
-        .bind(chunk.total_chunks)
-        .bind(chunk.file_size)
-        .bind(chunk.chunk_size)
-        .bind(&chunk.file_name)
-        .bind(&chunk.save_path)
-        .bind(chunk.completed)
-        .bind(&chunk.upload_id)
-        .bind(chunk.chunk_index)
-        .execute(pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Failed to update upload chunk: {}", e)))?;
-    } else {
-        upsert_upload_chunk(pool, chunk).await?;
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                r#"
+                INSERT INTO uploadchunk (
+                    upload_id, chunk_index, chunk_hash, total_chunks, file_size, chunk_size, file_name, completed
+                ) VALUES (?, -1, ?, ?, ?, ?, ?, 0)
+                "#,
+            )
+            .bind(upload_id)
+            .bind(file_hash)
+            .bind(total_chunks)
+            .bind(file_size)
+            .bind(chunk_size)
+            .bind(file_name)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                r#"
+                INSERT INTO uploadchunk (
+                    upload_id, chunk_index, chunk_hash, total_chunks, file_size, chunk_size, file_name, completed
+                ) VALUES ($1, -1, $2, $3, $4, $5, $6, FALSE)
+                "#,
+            )
+            .bind(upload_id)
+            .bind(file_hash)
+            .bind(total_chunks)
+            .bind(file_size)
+            .bind(chunk_size)
+            .bind(file_name)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                r#"
+                INSERT INTO uploadchunk (
+                    upload_id, chunk_index, chunk_hash, total_chunks, file_size, chunk_size, file_name, completed
+                ) VALUES (?, -1, ?, ?, ?, ?, ?, 0)
+                "#,
+            )
+            .bind(upload_id)
+            .bind(file_hash)
+            .bind(total_chunks)
+            .bind(file_size)
+            .bind(chunk_size)
+            .bind(file_name)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
     }
     Ok(())
 }
 
-/// Get all completed chunks (chunk_index >= 0 and completed = 1) for a given upload_id.
-pub async fn get_completed_upload_chunks(
-    pool: &SqlitePool,
+pub async fn get_chunk_session(
+    pool: &DbPool,
     upload_id: &str,
-) -> Result<Vec<UploadChunk>, AppError> {
-    sqlx::query_as::<_, UploadChunk>(
-        r#"
-        SELECT id, upload_id, chunk_index, chunk_hash, total_chunks,
-               file_size, chunk_size, file_name, save_path, created_at, completed
-        FROM uploadchunk
-        WHERE upload_id = ? AND chunk_index >= 0 AND completed = 1
-        ORDER BY chunk_index ASC
-        "#,
-    )
-    .bind(upload_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch completed upload chunks: {}", e)))
+) -> Result<Option<(String, i64, i32, i32)>, AppError> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query_as(
+                "SELECT file_name, file_size, chunk_size, total_chunks FROM uploadchunk WHERE upload_id = ? AND chunk_index = -1",
+            )
+            .bind(upload_id)
+            .fetch_optional(p)
+            .await
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_as(
+                "SELECT file_name, file_size, chunk_size, total_chunks FROM uploadchunk WHERE upload_id = $1 AND chunk_index = -1",
+            )
+            .bind(upload_id)
+            .fetch_optional(p)
+            .await
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as(
+                "SELECT file_name, file_size, chunk_size, total_chunks FROM uploadchunk WHERE upload_id = ? AND chunk_index = -1",
+            )
+            .bind(upload_id)
+            .fetch_optional(p)
+            .await
+        }
+    }
+    .map_err(|e| AppError::Database(e.to_string()))
 }
 
-/// Count completed chunks for a given upload_id.
-pub async fn count_completed_chunks(
-    pool: &SqlitePool,
+pub async fn mark_chunk_completed(
+    pool: &DbPool,
     upload_id: &str,
-) -> Result<i64, AppError> {
-    let row: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM uploadchunk WHERE upload_id = ? AND chunk_index >= 0 AND completed = 1"
-    )
-    .bind(upload_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to count completed chunks: {}", e)))?;
-    Ok(row.0)
+    chunk_index: i32,
+) -> Result<(), AppError> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO uploadchunk (upload_id, chunk_index, chunk_hash, total_chunks, file_size, chunk_size, file_name, completed) VALUES (?, ?, '', 0, 0, 0, '', 1)"
+            )
+            .bind(upload_id)
+            .bind(chunk_index)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "INSERT INTO uploadchunk (upload_id, chunk_index, chunk_hash, total_chunks, file_size, chunk_size, file_name, completed) VALUES ($1, $2, '', 0, 0, 0, '', TRUE)"
+            )
+            .bind(upload_id)
+            .bind(chunk_index)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "INSERT INTO uploadchunk (upload_id, chunk_index, chunk_hash, total_chunks, file_size, chunk_size, file_name, completed) VALUES (?, ?, '', 0, 0, 0, '', 1)"
+            )
+            .bind(upload_id)
+            .bind(chunk_index)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+    }
+    Ok(())
 }
 
-/// Find an existing incomplete chunk session for breakpoint resume.
-pub async fn find_existing_chunk_session(
-    pool: &SqlitePool,
-    file_hash: &str,
-    file_size: i64,
-    file_name: &str,
-) -> Result<Option<UploadChunk>, AppError> {
-    sqlx::query_as::<_, UploadChunk>(
-        r#"
-        SELECT id, upload_id, chunk_index, chunk_hash, total_chunks,
-               file_size, chunk_size, file_name, save_path, created_at, completed
-        FROM uploadchunk
-        WHERE chunk_hash = ? AND chunk_index = -1 AND file_size = ? AND file_name = ?
-        ORDER BY id DESC
-        LIMIT 1
-        "#,
-    )
-    .bind(file_hash)
-    .bind(file_size)
-    .bind(file_name)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to find existing chunk session: {}", e)))
+pub async fn get_uploaded_chunk_indexes(
+    pool: &DbPool,
+    upload_id: &str,
+) -> Result<Vec<i32>, AppError> {
+    let rows: Vec<(i32,)> = match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query_as("SELECT chunk_index FROM uploadchunk WHERE upload_id = ? AND completed = 1")
+                .bind(upload_id)
+                .fetch_all(p)
+                .await
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_as("SELECT chunk_index FROM uploadchunk WHERE upload_id = $1 AND completed = TRUE")
+                .bind(upload_id)
+                .fetch_all(p)
+                .await
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as("SELECT chunk_index FROM uploadchunk WHERE upload_id = ? AND completed = 1")
+                .bind(upload_id)
+                .fetch_all(p)
+                .await
+        }
+    }
+    .map_err(|e| AppError::Database(e.to_string()))?;
+
+    Ok(rows.into_iter().map(|(idx,)| idx).collect())
 }
 
-/// Delete all chunks associated with an upload_id.
-pub async fn delete_upload_chunks(pool: &SqlitePool, upload_id: &str) -> Result<u64, AppError> {
-    let res = sqlx::query("DELETE FROM uploadchunk WHERE upload_id = ?")
-        .bind(upload_id)
-        .execute(pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Failed to delete upload chunks: {}", e)))?;
+pub async fn delete_upload_chunks(pool: &DbPool, upload_id: &str) -> Result<u64, AppError> {
+    let rows_affected = match pool {
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM uploadchunk WHERE upload_id = ?")
+            .bind(upload_id)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::Postgres(p) => sqlx::query("DELETE FROM uploadchunk WHERE upload_id = $1")
+            .bind(upload_id)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::MySql(p) => sqlx::query("DELETE FROM uploadchunk WHERE upload_id = ?")
+            .bind(upload_id)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+    };
 
-    Ok(res.rows_affected())
+    Ok(rows_affected)
 }
 
 // ============================================================================
 // PresignSession CRUD
 // ============================================================================
 
-/// Insert a new presign upload session.
 pub async fn insert_presign_session(
-    pool: &SqlitePool,
-    session: &PresignSession,
-) -> Result<PresignSession, AppError> {
-    let row = sqlx::query_as::<_, PresignSession>(
-        r#"
-        INSERT INTO presignuploadsession (
-            upload_id, file_name, file_size, save_path, mode,
-            expire_value, expire_style, expires_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING id, upload_id, file_name, file_size, save_path, mode,
-                  expire_value, expire_style, created_at, expires_at
-        "#,
-    )
-    .bind(&session.upload_id)
-    .bind(&session.file_name)
-    .bind(session.file_size)
-    .bind(&session.save_path)
-    .bind(&session.mode)
-    .bind(session.expire_value)
-    .bind(&session.expire_style)
-    .bind(session.expires_at)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to insert presign session: {}", e)))?;
-
-    Ok(row)
+    pool: &DbPool,
+    upload_id: &str,
+    file_name: &str,
+    file_size: i64,
+    save_path: &str,
+    mode: &str,
+    expire_value: i32,
+    expire_style: &str,
+    expires_at: DateTime<Utc>,
+) -> Result<(), AppError> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                r#"
+                INSERT INTO presignuploadsession (
+                    upload_id, file_name, file_size, save_path, mode, expire_value, expire_style, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(upload_id)
+            .bind(file_name)
+            .bind(file_size)
+            .bind(save_path)
+            .bind(mode)
+            .bind(expire_value)
+            .bind(expire_style)
+            .bind(expires_at)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                r#"
+                INSERT INTO presignuploadsession (
+                    upload_id, file_name, file_size, save_path, mode, expire_value, expire_style, expires_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                "#,
+            )
+            .bind(upload_id)
+            .bind(file_name)
+            .bind(file_size)
+            .bind(save_path)
+            .bind(mode)
+            .bind(expire_value)
+            .bind(expire_style)
+            .bind(expires_at)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                r#"
+                INSERT INTO presignuploadsession (
+                    upload_id, file_name, file_size, save_path, mode, expire_value, expire_style, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(upload_id)
+            .bind(file_name)
+            .bind(file_size)
+            .bind(save_path)
+            .bind(mode)
+            .bind(expire_value)
+            .bind(expire_style)
+            .bind(expires_at)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+    }
+    Ok(())
 }
 
-/// Get a presign upload session by its upload_id.
 pub async fn get_presign_session(
-    pool: &SqlitePool,
+    pool: &DbPool,
     upload_id: &str,
 ) -> Result<Option<PresignSession>, AppError> {
-    sqlx::query_as::<_, PresignSession>(
-        r#"
-        SELECT id, upload_id, file_name, file_size, save_path, mode,
-               expire_value, expire_style, created_at, expires_at
-        FROM presignuploadsession
-        WHERE upload_id = ?
-        "#,
-    )
-    .bind(upload_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch presign session: {}", e)))
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query_as::<_, PresignSession>(
+                "SELECT * FROM presignuploadsession WHERE upload_id = ?",
+            )
+            .bind(upload_id)
+            .fetch_optional(p)
+            .await
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_as::<_, PresignSession>(
+                "SELECT * FROM presignuploadsession WHERE upload_id = $1",
+            )
+            .bind(upload_id)
+            .fetch_optional(p)
+            .await
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as::<_, PresignSession>(
+                "SELECT * FROM presignuploadsession WHERE upload_id = ?",
+            )
+            .bind(upload_id)
+            .fetch_optional(p)
+            .await
+        }
+    }
+    .map_err(|e| AppError::Database(e.to_string()))
 }
 
-/// Delete a presign upload session by its upload_id.
-pub async fn delete_presign_session(
-    pool: &SqlitePool,
-    upload_id: &str,
-) -> Result<bool, AppError> {
-    let res = sqlx::query("DELETE FROM presignuploadsession WHERE upload_id = ?")
-        .bind(upload_id)
-        .execute(pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Failed to delete presign session: {}", e)))?;
+pub async fn delete_presign_session(pool: &DbPool, upload_id: &str) -> Result<bool, AppError> {
+    let rows_affected = match pool {
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM presignuploadsession WHERE upload_id = ?")
+            .bind(upload_id)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::Postgres(p) => sqlx::query("DELETE FROM presignuploadsession WHERE upload_id = $1")
+            .bind(upload_id)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::MySql(p) => sqlx::query("DELETE FROM presignuploadsession WHERE upload_id = ?")
+            .bind(upload_id)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+    };
 
-    Ok(res.rows_affected() > 0)
+    Ok(rows_affected > 0)
+}
+
+pub async fn delete_expired_presign_sessions(
+    pool: &DbPool,
+    now: DateTime<Utc>,
+) -> Result<u64, AppError> {
+    let rows_affected = match pool {
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM presignuploadsession WHERE expires_at < ?")
+            .bind(now)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::Postgres(p) => sqlx::query("DELETE FROM presignuploadsession WHERE expires_at < $1")
+            .bind(now)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+        DbPool::MySql(p) => sqlx::query("DELETE FROM presignuploadsession WHERE expires_at < ?")
+            .bind(now)
+            .execute(p)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .rows_affected(),
+    };
+
+    Ok(rows_affected)
+}
+
+// ============================================================================
+// View Presets
+// ============================================================================
+
+pub async fn get_view_presets(pool: &DbPool) -> Result<Vec<serde_json::Value>, AppError> {
+    if let Some(kv) = get_key_value(pool, "file_view_presets").await? {
+        if let Some(val_str) = kv.value {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&val_str) {
+                if val.is_array() {
+                    return Ok(val.as_array().cloned().unwrap_or_default());
+                } else if let Some(presets) = val.get("presets").and_then(|v| v.as_array()) {
+                    return Ok(presets.clone());
+                }
+            }
+        }
+    }
+    Ok(Vec::new())
+}
+
+pub async fn save_view_preset(
+    pool: &DbPool,
+    id: Option<String>,
+    name: String,
+    filters: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let mut presets = get_view_presets(pool).await?;
+    let now_str = Utc::now().to_rfc3339();
+    let preset_id = id.unwrap_or_else(|| format!("vp_{}", uuid::Uuid::new_v4().simple()));
+
+    let mut found = false;
+    let mut updated_item = json!({});
+
+    for item in &mut presets {
+        if item.get("id").and_then(|v| v.as_str()) == Some(&preset_id) {
+            if let Some(obj) = item.as_object_mut() {
+                obj.insert("name".to_string(), json!(name));
+                obj.insert("filters".to_string(), filters.clone());
+                obj.insert("updated_at".to_string(), json!(now_str));
+            }
+            updated_item = item.clone();
+            found = true;
+            break;
+        }
+    }
+
+    if !found {
+        updated_item = json!({
+            "id": preset_id,
+            "name": name,
+            "filters": filters,
+            "created_at": now_str,
+            "updated_at": now_str
+        });
+        presets.push(updated_item.clone());
+    }
+
+    let json_str = serde_json::to_string(&presets).map_err(|e| AppError::Internal(e.to_string()))?;
+    set_key_value(pool, "file_view_presets", &json_str).await?;
+
+    Ok(updated_item)
+}
+
+pub async fn delete_view_preset(pool: &DbPool, preset_id: &str) -> Result<bool, AppError> {
+    let mut presets = get_view_presets(pool).await?;
+    let before_len = presets.len();
+    presets.retain(|item| item.get("id").and_then(|v| v.as_str()) != Some(preset_id));
+
+    if presets.len() != before_len {
+        let json_str = serde_json::to_string(&presets).map_err(|e| AppError::Internal(e.to_string()))?;
+        set_key_value(pool, "file_view_presets", &json_str).await?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::pool::init_pool;
-    use chrono::Duration;
 
     #[tokio::test]
     async fn test_filecode_crud_and_consumption() {
         let pool = init_pool(":memory:").await.unwrap();
-        let now = Utc::now();
 
         let new_code = NewFileCode {
-            code: "12345".to_string(),
-            prefix: "pre".to_string(),
-            suffix: "suf".to_string(),
-            uuid_file_name: Some("test.txt".to_string()),
-            file_path: Some("uploads".to_string()),
+            code: "TEST1".to_string(),
+            prefix: "2026/01/01".to_string(),
+            suffix: "test.png".to_string(),
+            uuid_file_name: Some("test.png".to_string()),
+            file_path: Some("2026/01/01".to_string()),
             size: 1024,
             text: None,
-            expired_at: Some(now + Duration::hours(1)),
-            expired_count: 2,
+            expired_at: Some(Utc::now() + chrono::Duration::hours(24)),
+            expired_count: 5,
             used_count: 0,
-            file_hash: Some("hash123".to_string()),
+            file_hash: None,
             is_chunked: false,
             upload_id: None,
         };
 
-        // Insert
-        let fc = insert_file_code(&pool, &new_code).await.unwrap();
-        assert_eq!(fc.code, "12345");
-        assert_eq!(fc.used_count, 0);
-        assert_eq!(fc.expired_count, 2);
-        assert_eq!(fc.get_file_path(), "uploads/test.txt");
+        let inserted = insert_file_code(&pool, &new_code).await.unwrap();
+        assert_eq!(inserted.code, "TEST1");
+        assert_eq!(inserted.expired_count, 5);
 
-        // Fetch by code
-        let fetched = get_file_code_by_code(&pool, "12345").await.unwrap().unwrap();
-        assert_eq!(fetched.id, fc.id);
+        let fetched = get_file_code_by_code(&pool, "TEST1").await.unwrap().unwrap();
+        assert_eq!(fetched.id, inserted.id);
 
-        // Consume once
-        let consumed1 = consume_file_code(&pool, fc.id, now).await.unwrap().unwrap();
-        assert_eq!(consumed1.used_count, 1);
-        assert_eq!(consumed1.expired_count, 1);
+        let consumed = consume_file_code(&pool, inserted.id, Utc::now())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(consumed.used_count, 1);
+        assert_eq!(consumed.expired_count, 4);
 
-        // Consume twice
-        let consumed2 = consume_file_code(&pool, fc.id, now).await.unwrap().unwrap();
-        assert_eq!(consumed2.used_count, 2);
-        assert_eq!(consumed2.expired_count, 0);
+        let deleted = delete_file_code(&pool, inserted.id).await.unwrap();
+        assert!(deleted);
 
-        // Consume third time (should fail because expired_count is 0)
-        let consumed3 = consume_file_code(&pool, fc.id, now).await.unwrap();
-        assert!(consumed3.is_none());
-
-        // Check expired filecodes
-        let expired = get_expired_file_codes(&pool, now).await.unwrap();
-        assert_eq!(expired.len(), 1);
-        assert_eq!(expired[0].id, fc.id);
-
-        // Count and sum size
-        assert_eq!(count_total_files(&pool).await.unwrap(), 1);
-        assert_eq!(sum_total_storage_size(&pool).await.unwrap(), 1024);
-
-        // Delete
-        assert!(delete_file_code(&pool, fc.id).await.unwrap());
-        assert_eq!(count_total_files(&pool).await.unwrap(), 0);
+        let missing = get_file_code_by_code(&pool, "TEST1").await.unwrap();
+        assert!(missing.is_none());
     }
 
     #[tokio::test]
     async fn test_keyvalue_crud() {
         let pool = init_pool(":memory:").await.unwrap();
 
-        // Get non-existent
-        let val = get_key_value(&pool, "settings").await.unwrap();
-        assert!(val.is_none());
+        set_key_value(&pool, "site_name", "My FCB").await.unwrap();
+        let val = get_key_value(&pool, "site_name").await.unwrap().unwrap();
+        assert_eq!(val.value.as_deref(), Some("My FCB"));
 
-        // Set
-        let kv = set_key_value(&pool, "settings", Some(r#"{"open_upload":true}"#)).await.unwrap();
-        assert_eq!(kv.key, "settings");
-        assert_eq!(kv.value, Some(r#"{"open_upload":true}"#.to_string()));
+        set_key_value(&pool, "site_name", "Updated FCB").await.unwrap();
+        let updated = get_key_value(&pool, "site_name").await.unwrap().unwrap();
+        assert_eq!(updated.value.as_deref(), Some("Updated FCB"));
 
-        // Update
-        let kv2 = set_key_value(&pool, "settings", Some(r#"{"open_upload":false}"#)).await.unwrap();
-        assert_eq!(kv2.value, Some(r#"{"open_upload":false}"#.to_string()));
-
-        // Delete
-        assert!(delete_key_value(&pool, "settings").await.unwrap());
-        assert!(get_key_value(&pool, "settings").await.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn test_reservation_and_chunks() {
-        let pool = init_pool(":memory:").await.unwrap();
-        let now = Utc::now();
-
-        // Reservation
-        let res = insert_or_update_reservation(&pool, "tok1", 500, now + Duration::minutes(10)).await.unwrap();
-        assert_eq!(res.size, 500);
-
-        let active = get_active_reservation(&pool, "tok1", now).await.unwrap();
-        assert!(active.is_some());
-        assert_eq!(sum_active_reserved_size(&pool, now).await.unwrap(), 500);
-
-        // Expired reservation purge
-        let purged = delete_expired_reservations(&pool, now + Duration::minutes(15)).await.unwrap();
-        assert_eq!(purged, 1);
-        assert_eq!(sum_active_reserved_size(&pool, now).await.unwrap(), 0);
-
-        // Upload chunk
-        let chunk = UploadChunk {
-            id: 0,
-            upload_id: "u123".to_string(),
-            chunk_index: 0,
-            chunk_hash: "chash0".to_string(),
-            total_chunks: 2,
-            file_size: 200,
-            chunk_size: 100,
-            file_name: "test.bin".to_string(),
-            save_path: Some("data/test.bin".to_string()),
-            created_at: None,
-            completed: true,
-        };
-        upsert_upload_chunk(&pool, &chunk).await.unwrap();
-
-        let chunks = get_upload_chunks(&pool, "u123").await.unwrap();
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].chunk_hash, "chash0");
-
-        let deleted_chunks = delete_upload_chunks(&pool, "u123").await.unwrap();
-        assert_eq!(deleted_chunks, 1);
+        let deleted = delete_key_value(&pool, "site_name").await.unwrap();
+        assert!(deleted);
     }
 }

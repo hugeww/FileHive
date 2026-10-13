@@ -8,7 +8,10 @@ use axum::{
 use chrono::Utc;
 use fcb_config::quota::{release_storage, reserve_storage};
 use fcb_core::{generate_code, sanitize_filename, APIResponse, AppError};
-use fcb_db::crud::{insert_file_code, NewFileCode};
+use fcb_db::crud::{
+    delete_upload_chunks, get_chunk_session, get_uploaded_chunk_indexes, insert_chunk_session,
+    insert_file_code, mark_chunk_completed, NewFileCode,
+};
 use serde::Deserialize;
 use serde_json::json;
 use crate::state::AppState;
@@ -117,22 +120,16 @@ pub async fn chunk_init_handler(
     let file_hash = payload.file_hash.unwrap_or_default();
 
     // 写入 session 记录到 uploadchunk (chunk_index = -1 作为 session 占位)
-    sqlx::query(
-        r#"
-        INSERT INTO uploadchunk (
-            upload_id, chunk_index, chunk_hash, total_chunks, file_size, chunk_size, file_name, completed
-        ) VALUES (?, -1, ?, ?, ?, ?, ?, 0)
-        "#,
+    insert_chunk_session(
+        &state.pool,
+        &upload_id,
+        &payload.file_name,
+        payload.file_size,
+        chunk_size,
+        total_chunks,
+        &file_hash,
     )
-    .bind(&upload_id)
-    .bind(&file_hash)
-    .bind(total_chunks)
-    .bind(payload.file_size)
-    .bind(chunk_size)
-    .bind(&payload.file_name)
-    .execute(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
+    .await?;
 
     Ok(Json(APIResponse::success(json!({
         "upload_id": upload_id,
@@ -173,13 +170,7 @@ pub async fn chunk_upload_path_handler(
         .await?;
 
     // 标记分片已完成
-    let _ = sqlx::query(
-        "INSERT OR REPLACE INTO uploadchunk (upload_id, chunk_index, chunk_hash, total_chunks, file_size, chunk_size, file_name, completed) VALUES (?, ?, '', 0, 0, 0, '', 1)"
-    )
-    .bind(&upload_id)
-    .bind(chunk_index)
-    .execute(&state.pool)
-    .await;
+    mark_chunk_completed(&state.pool, &upload_id, chunk_index).await?;
 
     Ok(Json(APIResponse::success(json!({
         "chunk_index": chunk_index,
@@ -225,6 +216,8 @@ pub async fn chunk_upload_handler(
         .storage
         .save_chunk(&upload_id, chunk_index, data, "")
         .await?;
+
+    mark_chunk_completed(&state.pool, &upload_id, chunk_index).await?;
 
     Ok(Json(APIResponse::success(json!({ "chunk_index": chunk_index }))))
 }
@@ -297,15 +290,9 @@ async fn do_complete_chunk(
     expire_value: i32,
     expire_style: String,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
-    let session_row: Option<(String, i64, i32)> = sqlx::query_as(
-        "SELECT file_name, file_size, total_chunks FROM uploadchunk WHERE upload_id = ? AND chunk_index = -1",
-    )
-    .bind(&upload_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
+    let session_row = get_chunk_session(&state.pool, &upload_id).await?;
 
-    let (file_name, file_size, session_total) =
+    let (file_name, file_size, _, session_total) =
         session_row.ok_or_else(|| AppError::NotFound("未找到上传任务会话".to_string()))?;
 
     let total_chunks = provided_total_chunks.unwrap_or(session_total);
@@ -363,10 +350,7 @@ async fn do_complete_chunk(
 
     // 释放预留并清理
     let _ = release_storage(&state.pool, &upload_id).await;
-    let _ = sqlx::query("DELETE FROM uploadchunk WHERE upload_id = ?")
-        .bind(&upload_id)
-        .execute(&state.pool)
-        .await;
+    let _ = delete_upload_chunks(&state.pool, &upload_id).await;
 
     Ok(Json(APIResponse::success(json!({
         "code": code,
@@ -379,26 +363,12 @@ pub async fn chunk_status_handler(
     State(state): State<AppState>,
     Path(upload_id): Path<String>,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
-    let session_row: Option<(String, i64, i32, i32)> = sqlx::query_as(
-        "SELECT file_name, file_size, chunk_size, total_chunks FROM uploadchunk WHERE upload_id = ? AND chunk_index = -1",
-    )
-    .bind(&upload_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
+    let session_row = get_chunk_session(&state.pool, &upload_id).await?;
 
     let (file_name, file_size, chunk_size, total_chunks) =
         session_row.ok_or_else(|| AppError::NotFound("上传会话不存在".to_string()))?;
 
-    let chunks: Vec<(i32,)> = sqlx::query_as(
-        "SELECT chunk_index FROM uploadchunk WHERE upload_id = ? AND completed = 1",
-    )
-    .bind(&upload_id)
-    .fetch_all(&state.pool)
-    .await
-    .unwrap_or_default();
-
-    let uploaded: Vec<i32> = chunks.into_iter().map(|(idx,)| idx).collect();
+    let uploaded = get_uploaded_chunk_indexes(&state.pool, &upload_id).await?;
     let progress = if total_chunks > 0 {
         (uploaded.len() as f64 / total_chunks as f64) * 100.0
     } else {
@@ -422,10 +392,7 @@ pub async fn chunk_abort_handler(
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
     let _ = state.storage.delete_chunks(&upload_id).await;
     let _ = release_storage(&state.pool, &upload_id).await;
-    let _ = sqlx::query("DELETE FROM uploadchunk WHERE upload_id = ?")
-        .bind(&upload_id)
-        .execute(&state.pool)
-        .await;
+    let _ = delete_upload_chunks(&state.pool, &upload_id).await;
 
     Ok(Json(APIResponse::success(json!({ "status": "aborted" }))))
 }

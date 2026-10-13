@@ -11,13 +11,16 @@
 ```
 filecodebox-rs/
 ├── Cargo.toml                  # Workspace 顶级清单
-├── crates/
-│   ├── fcb-core/               # 基础类型、统一定义 (APIResponse, ErrorResponse, AppError, 版本常量)
-│   ├── fcb-storage/            # 基于 Apache OpenDAL 的统一多存储驱动 (Local, S3, WebDAV, OneDrive)
-│   ├── fcb-db/                 # SQLite 异步连接池 (WAL模式、busy_timeout、自动迁移与 CRUD 辅助)
-│   ├── fcb-security/           # scrypt 密码哈希兼容、JWT 鉴权、出站 SSRF 防御
-│   ├── fcb-config/             # 基于 ArcSwap 的零锁配置热更新、内存滑动窗口 IP 限流、配额管理
-│   └── fcb-server/             # Axum 业务服务 (分发 /share, /chunk, /presign, /admin, /mcp, /setup)
+├── Dockerfile                  # 轻量容器多阶段构建
+├── frontend/                   # Vue 3 前端源码 (FileCodeBoxFronted)
+├── themes/                     # 前端编译静态产物 (2024 主题)
+└── crates/
+    ├── fcb-core/               # 基础类型、统一定义 (APIResponse, ErrorResponse, AppError, 版本常量)
+    ├── fcb-storage/            # 基于 Apache OpenDAL 的统一多存储驱动 (Local, S3, WebDAV, OneDrive)
+    ├── fcb-db/                 # 多数据库连接池 (SQLite / PostgreSQL / MySQL) 与全套 CRUD
+    ├── fcb-security/           # scrypt 密码哈希兼容、JWT 鉴权、出站 SSRF 防御
+    ├── fcb-config/             # 基于 ArcSwap 的零锁配置热更新、内存滑动窗口 IP 限流、配额管理
+    └── fcb-server/             # Axum 业务服务 (分发 /share, /chunk, /presign, /admin, /mcp, /setup)
 ```
 
 ---
@@ -27,13 +30,18 @@ filecodebox-rs/
 1. **原位平替与数据 100% 兼容**：
    - 数据表结构完全兼容原版 SQLite `filecodebox.db` (`filecodes`, `uploadchunk`, `keyvalue`, `presignuploadsession`, `storagereservation`)。
    - 密码验证严格复现 Python `scrypt$16384$8$1${salt}${hash}` 格式，存量实例更换为 Rust 二进制后可无缝平滑升级，无需重置密码。
-2. **零锁配置管理 (`arc_swap`)**：
+2. **多数据库原生支持 (SQLite / PostgreSQL / MySQL)**：
+   - 根据 `DATABASE_URL` 环境变量自动识别底层数据库类型并完成连接池创建与自建表迁移：
+     - SQLite: `sqlite:data/filecodebox.db` 或普通文件路径 `data/filecodebox.db`
+     - PostgreSQL: `postgres://user:password@localhost:5432/filecodebox`
+     - MySQL / MariaDB: `mysql://user:password@localhost:3306/filecodebox`
+3. **零锁配置管理 (`arc_swap`)**：
    - 读请求完全无锁，管理员修改配置时通过 `ArcSwap` 原子替换全局配置指针，避免读写锁争用。
-3. **原生跨存储支持 (`Apache OpenDAL`)**：
+4. **原生跨存储支持 (`Apache OpenDAL`)**：
    - 彻底废除多套孤立驱动，直接依托 Rust 生态最强大的存储抽象引擎，无缝覆盖本地存储、AWS S3、MinIO、WebDAV 与 OneDrive。
-4. **极低内存占用与单二进制分发**：
+5. **极低内存占用与单二进制分发**：
    - 内存占用从 Python 运行时的 150MB~200MB 下降至 10MB~20MB。
-   - 可直接独立运行，或通过 `Dockerfile-rs` 编译进轻量容器。
+   - 前端已内置并支持直接在 `frontend/` 下热重载开发或编译部署。
 
 ---
 
@@ -51,14 +59,32 @@ cargo test --workspace
 cargo build --release -p fcb-server
 ```
 
-### 2. 启动服务
+### 2. 前端构建 (可选自定义)
 ```bash
-# 环境变量
+cd frontend
+pnpm install
+pnpm run build-only # 自动打包至 themes/2024
+```
+
+### 3. 启动服务
+
+#### 模式 A: 使用默认 SQLite
+```bash
 export PORT=12345
 export HOST="0.0.0.0"
 export DATABASE_URL="data/filecodebox.db"
+./target/release/fcb-server
+```
 
-# 启动二进制
+#### 模式 B: 使用 PostgreSQL
+```bash
+export DATABASE_URL="postgres://postgres:password@localhost:5432/filecodebox"
+./target/release/fcb-server
+```
+
+#### 模式 C: 使用 MySQL
+```bash
+export DATABASE_URL="mysql://root:password@localhost:3306/filecodebox"
 ./target/release/fcb-server
 ```
 

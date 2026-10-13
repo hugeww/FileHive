@@ -8,4 +8,4 @@ pub mod pool;
 pub use crud::*;
 pub use migrations::run_migrations;
 pub use models::*;
-pub use pool::init_pool;
+pub use pool::{detect_db_kind, init_pool, DbKind, DbPool};

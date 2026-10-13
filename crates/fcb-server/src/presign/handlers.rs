@@ -6,7 +6,10 @@ use axum::{
 use chrono::{Duration, Utc};
 use fcb_config::quota::{release_storage, reserve_storage};
 use fcb_core::{sanitize_filename, APIResponse, AppError};
-use fcb_db::models::PresignSession;
+use fcb_db::crud::{
+    delete_presign_session, get_presign_session, insert_file_code, insert_presign_session,
+    NewFileCode,
+};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -65,24 +68,18 @@ pub async fn presign_init_handler(
     let mode = "proxy".to_string();
     let proxy_upload_url = format!("/presign/upload/proxy/{}", upload_id);
 
-    sqlx::query(
-        r#"
-        INSERT INTO presignuploadsession (
-            upload_id, file_name, file_size, save_path, mode, expire_value, expire_style, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
+    insert_presign_session(
+        &state.pool,
+        &upload_id,
+        &clean_name,
+        payload.file_size,
+        &save_path,
+        &mode,
+        payload.expire_value,
+        &payload.expire_style,
+        expires_at,
     )
-    .bind(&upload_id)
-    .bind(&clean_name)
-    .bind(payload.file_size)
-    .bind(&save_path)
-    .bind(&mode)
-    .bind(payload.expire_value)
-    .bind(&payload.expire_style)
-    .bind(expires_at)
-    .execute(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
+    .await?;
 
     Ok(Json(APIResponse::success(json!({
         "upload_id": upload_id,
@@ -98,15 +95,10 @@ pub async fn presign_proxy_upload_handler(
     Path(upload_id): Path<String>,
     mut multipart: Multipart,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
-    let session: Option<PresignSession> = sqlx::query_as(
-        "SELECT * FROM presignuploadsession WHERE upload_id = ?",
-    )
-    .bind(&upload_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
+    let session = get_presign_session(&state.pool, &upload_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("上传会话不存在".to_string()))?;
 
-    let session = session.ok_or_else(|| AppError::NotFound("上传会话不存在".to_string()))?;
     if session.is_expired(Utc::now()) {
         return Err(AppError::BadRequest("上传会话已过期".to_string()));
     }
@@ -177,7 +169,7 @@ pub async fn presign_proxy_upload_handler(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    let new_file = fcb_db::crud::NewFileCode {
+    let new_file = NewFileCode {
         code: code.clone(),
         prefix: dir_path.clone(),
         suffix: found_name.clone(),
@@ -193,16 +185,12 @@ pub async fn presign_proxy_upload_handler(
         upload_id: Some(upload_id.clone()),
     };
 
-    fcb_db::crud::insert_file_code(&state.pool, &new_file).await?;
+    insert_file_code(&state.pool, &new_file).await?;
 
     // 删除会话与释放容量预留
     let reservation_token = format!("presign:{}", upload_id);
     let _ = release_storage(&state.pool, &reservation_token).await;
-
-    let _ = sqlx::query("DELETE FROM presignuploadsession WHERE upload_id = ?")
-        .bind(&upload_id)
-        .execute(&state.pool)
-        .await;
+    let _ = delete_presign_session(&state.pool, &upload_id).await;
 
     Ok(Json(APIResponse::success(json!({
         "code": code,
@@ -214,15 +202,10 @@ pub async fn presign_confirm_handler(
     State(state): State<AppState>,
     Path(upload_id): Path<String>,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
-    let session: Option<PresignSession> = sqlx::query_as(
-        "SELECT * FROM presignuploadsession WHERE upload_id = ?",
-    )
-    .bind(&upload_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
+    let session = get_presign_session(&state.pool, &upload_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("上传会话不存在".to_string()))?;
 
-    let session = session.ok_or_else(|| AppError::NotFound("上传会话不存在".to_string()))?;
     if session.is_expired(Utc::now()) {
         return Err(AppError::BadRequest("上传会话已过期".to_string()));
     }
@@ -259,7 +242,7 @@ pub async fn presign_confirm_handler(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    let new_file = fcb_db::crud::NewFileCode {
+    let new_file = NewFileCode {
         code: code.clone(),
         prefix: dir_path.clone(),
         suffix: session.file_name.clone(),
@@ -275,15 +258,11 @@ pub async fn presign_confirm_handler(
         upload_id: Some(upload_id.clone()),
     };
 
-    fcb_db::crud::insert_file_code(&state.pool, &new_file).await?;
+    insert_file_code(&state.pool, &new_file).await?;
 
     let reservation_token = format!("presign:{}", upload_id);
     let _ = release_storage(&state.pool, &reservation_token).await;
-
-    let _ = sqlx::query("DELETE FROM presignuploadsession WHERE upload_id = ?")
-        .bind(&upload_id)
-        .execute(&state.pool)
-        .await;
+    let _ = delete_presign_session(&state.pool, &upload_id).await;
 
     Ok(Json(APIResponse::success(json!({
         "code": code,
@@ -295,15 +274,10 @@ pub async fn presign_status_handler(
     State(state): State<AppState>,
     Path(upload_id): Path<String>,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
-    let session: Option<PresignSession> = sqlx::query_as(
-        "SELECT * FROM presignuploadsession WHERE upload_id = ?",
-    )
-    .bind(&upload_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
+    let session = get_presign_session(&state.pool, &upload_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("上传会话不存在".to_string()))?;
 
-    let session = session.ok_or_else(|| AppError::NotFound("上传会话不存在".to_string()))?;
     let is_exp = session.is_expired(Utc::now());
 
     Ok(Json(APIResponse::success(json!({
@@ -321,25 +295,15 @@ pub async fn presign_cancel_handler(
     State(state): State<AppState>,
     Path(upload_id): Path<String>,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
-    let session: Option<PresignSession> = sqlx::query_as(
-        "SELECT * FROM presignuploadsession WHERE upload_id = ?",
-    )
-    .bind(&upload_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
-
-    let session = session.ok_or_else(|| AppError::NotFound("上传会话不存在".to_string()))?;
+    let session = get_presign_session(&state.pool, &upload_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("上传会话不存在".to_string()))?;
 
     let reservation_token = format!("presign:{}", upload_id);
     let _ = release_storage(&state.pool, &reservation_token).await;
 
     let _ = state.storage.delete_file(&session.save_path).await;
-
-    let _ = sqlx::query("DELETE FROM presignuploadsession WHERE upload_id = ?")
-        .bind(&upload_id)
-        .execute(&state.pool)
-        .await;
+    let _ = delete_presign_session(&state.pool, &upload_id).await;
 
     Ok(Json(APIResponse::success(json!({ "ok": true }))))
 }

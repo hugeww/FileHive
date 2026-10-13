@@ -1,9 +1,10 @@
 use std::sync::Arc;
 use arc_swap::ArcSwap;
 use fcb_core::AppError;
+use fcb_db::crud::{get_key_value, set_key_value};
+use fcb_db::DbPool;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::SqlitePool;
 
 pub const ADMIN_SESSION_EXPIRE_DEFAULT: i64 = 30 * 24 * 60 * 60; // 2592000 (30 days)
 pub const ADMIN_SESSION_EXPIRE_MIN: i64 = 24 * 60 * 60;          // 86400 (1 day)
@@ -167,16 +168,16 @@ impl Default for SystemSettings {
     }
 }
 
-/// 配置管理器，持有热更新配置与 SQLite 连接池
+/// 配置管理器，持有热更新配置与数据库连接池
 #[derive(Clone)]
 pub struct ConfigManager {
     settings: Arc<ArcSwap<SystemSettings>>,
-    pool: SqlitePool,
+    pool: DbPool,
 }
 
 impl ConfigManager {
     /// 基于数据库连接池创建配置管理器，初始配置为默认值
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: DbPool) -> Self {
         Self {
             settings: Arc::new(ArcSwap::from_pointee(SystemSettings::default())),
             pool,
@@ -184,7 +185,7 @@ impl ConfigManager {
     }
 
     /// 基于已有的设置结构创建配置管理器
-    pub fn with_settings(pool: SqlitePool, settings: SystemSettings) -> Self {
+    pub fn with_settings(pool: DbPool, settings: SystemSettings) -> Self {
         Self {
             settings: Arc::new(ArcSwap::from_pointee(settings)),
             pool,
@@ -196,8 +197,8 @@ impl ConfigManager {
         self.settings.clone()
     }
 
-    /// 获取底层 SqlitePool
-    pub fn pool(&self) -> &SqlitePool {
+    /// 获取底层 DbPool
+    pub fn pool(&self) -> &DbPool {
         &self.pool
     }
 
@@ -208,30 +209,27 @@ impl ConfigManager {
 
     /// 从 keyvalue 表中读取 key = 'settings' 并解析合并到运行时
     pub async fn load_from_db(&self) -> Result<(), AppError> {
-        let row: Option<(Option<String>,)> = sqlx::query_as(
-            "SELECT value FROM keyvalue WHERE key = 'settings'"
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
+        let kv_opt = get_key_value(&self.pool, "settings").await?;
 
-        if let Some((Some(json_str),)) = row {
-            if !json_str.trim().is_empty() {
-                // 基于当前默认值进行字段合并
-                let mut base_val = serde_json::to_value(SystemSettings::default())
-                    .map_err(|e| AppError::Internal(e.to_string()))?;
+        if let Some(kv) = kv_opt {
+            if let Some(json_str) = kv.value {
+                if !json_str.trim().is_empty() {
+                    // 基于当前默认值进行字段合并
+                    let mut base_val = serde_json::to_value(SystemSettings::default())
+                        .map_err(|e| AppError::Internal(e.to_string()))?;
 
-                if let Ok(Value::Object(db_map)) = serde_json::from_str::<Value>(&json_str) {
-                    if let Value::Object(ref mut base_map) = base_val {
-                        for (k, v) in db_map {
-                            base_map.insert(k, v);
+                    if let Ok(Value::Object(db_map)) = serde_json::from_str::<Value>(&json_str) {
+                        if let Value::Object(ref mut base_map) = base_val {
+                            for (k, v) in db_map {
+                                base_map.insert(k, v);
+                            }
                         }
                     }
-                }
 
-                let loaded: SystemSettings = serde_json::from_value(base_val)
-                    .map_err(|e| AppError::Internal(format!("Failed to parse merged settings: {}", e)))?;
-                self.settings.store(Arc::new(loaded));
+                    let loaded: SystemSettings = serde_json::from_value(base_val)
+                        .map_err(|e| AppError::Internal(format!("Failed to parse merged settings: {}", e)))?;
+                    self.settings.store(Arc::new(loaded));
+                }
             }
         }
         Ok(())
@@ -260,13 +258,7 @@ impl ConfigManager {
         let json_str = serde_json::to_string(&new_settings)
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
-        sqlx::query(
-            "INSERT INTO keyvalue (key, value) VALUES ('settings', ?1) ON CONFLICT(key) DO UPDATE SET value = ?1"
-        )
-        .bind(&json_str)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
+        set_key_value(&self.pool, "settings", &json_str).await?;
 
         self.settings.store(Arc::new(new_settings));
         Ok(())
@@ -276,7 +268,6 @@ impl ConfigManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
 
     #[test]
     fn test_system_settings_defaults() {
@@ -309,22 +300,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_config_manager_db_lifecycle() {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-
-        sqlx::query(
-            "CREATE TABLE keyvalue (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key VARCHAR(255) NOT NULL UNIQUE,
-                value JSON,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-            );",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        let pool = fcb_db::init_pool(":memory:").await.unwrap();
 
         let manager = ConfigManager::new(pool.clone());
         assert_eq!(manager.get().name, "文件快递柜 - FileCodeBox");

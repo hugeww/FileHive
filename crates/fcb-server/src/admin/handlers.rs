@@ -7,7 +7,12 @@ use fcb_core::{
     version::APP_VERSION,
     APIResponse, AppError,
 };
-use fcb_db::crud::{delete_file_code, get_file_code_by_code, insert_file_code, NewFileCode};
+use fcb_db::crud::{
+    count_total_files, delete_file_code, delete_view_preset, get_file_code_by_code,
+    get_file_code_by_id, get_view_presets, insert_file_code, list_all_files, save_view_preset,
+    set_key_value, sum_total_storage_size, sum_total_used_count, update_file_policy_download_limit,
+    update_file_policy_expired_at, update_file_policy_make_permanent, NewFileCode,
+};
 use fcb_db::FileCode;
 use fcb_security::{
     create_jwt_token, hash_password, is_password_hashed, validate_outbound_endpoint,
@@ -75,49 +80,18 @@ pub async fn dashboard_handler(
     let settings = state.config.get();
     let now = Utc::now();
 
-    let total_files: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM filecodes")
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
+    let total_files = count_total_files(&state.pool).await?;
+    let all_size = sum_total_storage_size(&state.pool).await?;
+    let used_count = sum_total_used_count(&state.pool).await?;
 
-    let all_size: (Option<i64>,) = sqlx::query_as(
-        "SELECT SUM(size) FROM filecodes WHERE file_path IS NULL OR file_path != 'local-ref'",
-    )
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
-
-    let used_count: (Option<i64>,) = sqlx::query_as(
-        "SELECT SUM(used_count) FROM filecodes",
-    )
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
-
-    let text_count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM filecodes WHERE text IS NOT NULL",
-    )
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
-
-    let chunked_count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM filecodes WHERE is_chunked = 1",
-    )
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
-
-    let recent: Vec<FileCode> = sqlx::query_as(
-        "SELECT * FROM filecodes ORDER BY id DESC LIMIT 10",
-    )
-    .fetch_all(&state.pool)
-    .await
-    .unwrap_or_default();
+    let all_records = list_all_files(&state.pool).await?;
+    let text_count = all_records.iter().filter(|f| f.text.is_some()).count() as i64;
+    let chunked_count = all_records.iter().filter(|f| f.is_chunked).count() as i64;
 
     let mut expired_count = 0;
-    let recent_files: Vec<serde_json::Value> = recent
+    let recent_files: Vec<serde_json::Value> = all_records
         .iter()
+        .take(10)
         .map(|f| {
             let is_exp = f.is_expired(now);
             if is_exp {
@@ -139,22 +113,22 @@ pub async fn dashboard_handler(
         })
         .collect();
 
-    let storage_used_str = all_size.0.unwrap_or(0).to_string();
+    let storage_used_str = all_size.to_string();
 
     Ok(Json(APIResponse::success(json!({
-        "total_files": total_files.0,
+        "total_files": total_files,
         "storage_used": storage_used_str,
         "yesterday_count": 0,
         "yesterday_size": "0",
-        "today_count": total_files.0,
+        "today_count": total_files,
         "today_size": storage_used_str,
         "sys_uptime": 0,
-        "active_count": (total_files.0 - expired_count).max(0),
+        "active_count": (total_files - expired_count).max(0),
         "expired_count": expired_count,
-        "text_count": text_count.0,
-        "file_count": (total_files.0 - text_count.0).max(0),
-        "chunked_count": chunked_count.0,
-        "used_count": used_count.0.unwrap_or(0),
+        "text_count": text_count,
+        "file_count": (total_files - text_count).max(0),
+        "chunked_count": chunked_count,
+        "used_count": used_count,
         "storage_backend": settings.file_storage,
         "upload_size_limit": settings.upload_size,
         "open_upload": settings.open_upload,
@@ -303,10 +277,7 @@ pub async fn file_list_handler(
     let page = query.page.max(1);
     let size = query.size.or(query.page_size).unwrap_or(10).clamp(1, 100);
 
-    let all_files: Vec<FileCode> = sqlx::query_as("SELECT * FROM filecodes ORDER BY id DESC")
-        .fetch_all(&state.pool)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
+    let all_files = list_all_files(&state.pool).await?;
 
     let now = Utc::now();
     let kw = query
@@ -490,13 +461,10 @@ pub async fn file_detail_handler(
     }
     let id = file_id.ok_or_else(|| AppError::BadRequest("缺少 id 参数".to_string()))?;
 
-    let file: Option<FileCode> = sqlx::query_as("SELECT * FROM filecodes WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
+    let f = get_file_code_by_id(&state.pool, id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("文件不存在".to_string()))?;
 
-    let f = file.ok_or_else(|| AppError::NotFound("文件不存在".to_string()))?;
     let now = Utc::now();
     let mut detail = build_admin_file_item(&f, now);
 
@@ -534,60 +502,36 @@ pub async fn file_policy_action_handler(
     State(state): State<AppState>,
     Json(payload): Json<FilePolicyActionPayload>,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
-    let file: Option<FileCode> = sqlx::query_as("SELECT * FROM filecodes WHERE id = ?")
-        .bind(payload.id)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
+    let f = get_file_code_by_id(&state.pool, payload.id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("文件不存在".to_string()))?;
 
-    let f = file.ok_or_else(|| AppError::NotFound("文件不存在".to_string()))?;
     let now = Utc::now();
 
     match payload.action.as_str() {
         "extend_24h" => {
             let base = f.expired_at.unwrap_or(now).max(now);
             let next_exp = base + Duration::hours(24);
-            sqlx::query("UPDATE filecodes SET expired_at = ? WHERE id = ?")
-                .bind(next_exp)
-                .bind(f.id)
-                .execute(&state.pool)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            update_file_policy_expired_at(&state.pool, f.id, Some(next_exp)).await?;
         }
         "extend_7d" => {
             let base = f.expired_at.unwrap_or(now).max(now);
             let next_exp = base + Duration::days(7);
-            sqlx::query("UPDATE filecodes SET expired_at = ? WHERE id = ?")
-                .bind(next_exp)
-                .bind(f.id)
-                .execute(&state.pool)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            update_file_policy_expired_at(&state.pool, f.id, Some(next_exp)).await?;
         }
         "make_permanent" => {
-            sqlx::query("UPDATE filecodes SET expired_at = NULL, expired_count = -1 WHERE id = ?")
-                .bind(f.id)
-                .execute(&state.pool)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            update_file_policy_make_permanent(&state.pool, f.id).await?;
         }
         "reset_download_limit" => {
             let limit = payload.download_limit.unwrap_or(5);
-            sqlx::query("UPDATE filecodes SET expired_count = ? WHERE id = ?")
-                .bind(limit)
-                .bind(f.id)
-                .execute(&state.pool)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            update_file_policy_download_limit(&state.pool, f.id, limit).await?;
         }
         _ => return Err(AppError::BadRequest("不支持的策略动作".to_string())),
     }
 
-    let updated: FileCode = sqlx::query_as("SELECT * FROM filecodes WHERE id = ?")
-        .bind(payload.id)
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
+    let updated = get_file_code_by_id(&state.pool, payload.id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("文件不存在".to_string()))?;
 
     Ok(Json(APIResponse::success(build_admin_file_item(&updated, Utc::now()))))
 }
@@ -606,43 +550,22 @@ pub async fn file_batch_policy_action_handler(
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
     let now = Utc::now();
     for id in &payload.ids {
-        if let Ok(Some(f)) = sqlx::query_as::<_, FileCode>("SELECT * FROM filecodes WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&state.pool)
-            .await
-        {
+        if let Ok(Some(f)) = get_file_code_by_id(&state.pool, *id).await {
             match payload.action.as_str() {
                 "extend_24h" => {
                     let base = f.expired_at.unwrap_or(now).max(now);
-                    let _ = sqlx::query("UPDATE filecodes SET expired_at = ? WHERE id = ?")
-                        .bind(base + Duration::hours(24))
-                        .bind(f.id)
-                        .execute(&state.pool)
-                        .await;
+                    let _ = update_file_policy_expired_at(&state.pool, f.id, Some(base + Duration::hours(24))).await;
                 }
                 "extend_7d" => {
                     let base = f.expired_at.unwrap_or(now).max(now);
-                    let _ = sqlx::query("UPDATE filecodes SET expired_at = ? WHERE id = ?")
-                        .bind(base + Duration::days(7))
-                        .bind(f.id)
-                        .execute(&state.pool)
-                        .await;
+                    let _ = update_file_policy_expired_at(&state.pool, f.id, Some(base + Duration::days(7))).await;
                 }
                 "make_permanent" => {
-                    let _ = sqlx::query(
-                        "UPDATE filecodes SET expired_at = NULL, expired_count = -1 WHERE id = ?",
-                    )
-                    .bind(f.id)
-                    .execute(&state.pool)
-                    .await;
+                    let _ = update_file_policy_make_permanent(&state.pool, f.id).await;
                 }
                 "reset_download_limit" => {
                     let limit = payload.download_limit.unwrap_or(5);
-                    let _ = sqlx::query("UPDATE filecodes SET expired_count = ? WHERE id = ?")
-                        .bind(limit)
-                        .bind(f.id)
-                        .execute(&state.pool)
-                        .await;
+                    let _ = update_file_policy_download_limit(&state.pool, f.id, limit).await;
                 }
                 _ => {}
             }
@@ -670,13 +593,8 @@ pub async fn file_metadata_handler(
         "note": payload.note.unwrap_or_default(),
         "tags": payload.tags.unwrap_or_default()
     });
-    let _ = sqlx::query(
-        "INSERT INTO keyvalue (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-    )
-    .bind(&meta_key)
-    .bind(serde_json::to_string(&meta_json).unwrap_or_default())
-    .execute(&state.pool)
-    .await;
+
+    let _ = set_key_value(&state.pool, &meta_key, &serde_json::to_string(&meta_json).unwrap_or_default()).await;
 
     Ok(Json(APIResponse::success(meta_json)))
 }
@@ -692,12 +610,8 @@ pub async fn delete_file_handler(
     State(state): State<AppState>,
     Query(query): Query<DeleteFileQuery>,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
-    let file: Option<FileCode> = if let Some(id) = query.id {
-        sqlx::query_as("SELECT * FROM filecodes WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?
+    let file = if let Some(id) = query.id {
+        get_file_code_by_id(&state.pool, id).await?
     } else if let Some(code) = query.code {
         get_file_code_by_code(&state.pool, &code).await?
     } else {
@@ -733,11 +647,7 @@ pub async fn batch_delete_handler(
     Json(payload): Json<BatchDeletePayload>,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
     for id in payload.ids {
-        if let Ok(Some(f)) = sqlx::query_as::<_, FileCode>("SELECT * FROM filecodes WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&state.pool)
-            .await
-        {
+        if let Ok(Some(f)) = get_file_code_by_id(&state.pool, id).await {
             if f.file_path.as_deref() != Some("local-ref") {
                 let full = f.get_file_path();
                 if !full.is_empty() {
@@ -777,7 +687,6 @@ pub async fn config_update_handler(
     State(state): State<AppState>,
     Json(mut payload): Json<Value>,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
-    // 检查 SSRF
     let is_prod = std::env::var("APP_ENV").unwrap_or_default() == "production";
 
     if let Some(s3_url) = payload.get("s3_endpoint_url").and_then(|v| v.as_str()) {
@@ -1025,29 +934,11 @@ pub async fn file_view_presets_get_handler(
     _auth: AdminAuth,
     State(state): State<AppState>,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM keyvalue WHERE key = 'file_view_presets'")
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-    if let Some((json_str,)) = row {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
-            let list = if val.is_array() {
-                val
-            } else {
-                val.get("presets").cloned().unwrap_or_else(|| json!([]))
-            };
-            let count = list.as_array().map(|a| a.len()).unwrap_or(0);
-            return Ok(Json(APIResponse::success(json!({
-                "presets": list,
-                "total": count
-            }))));
-        }
-    }
-
+    let presets = get_view_presets(&state.pool).await?;
+    let total = presets.len();
     Ok(Json(APIResponse::success(json!({
-        "presets": [],
-        "total": 0
+        "presets": presets,
+        "total": total
     }))))
 }
 
@@ -1064,59 +955,8 @@ pub async fn file_view_presets_save_handler(
     State(state): State<AppState>,
     Json(payload): Json<FileViewPresetPayload>,
 ) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM keyvalue WHERE key = 'file_view_presets'")
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-    let mut presets: Vec<serde_json::Value> = row
-        .and_then(|(s,)| serde_json::from_str::<Vec<serde_json::Value>>(&s).ok())
-        .unwrap_or_default();
-
-    let now_str = Utc::now().to_rfc3339();
-    let preset_id = payload
-        .id
-        .clone()
-        .unwrap_or_else(|| format!("vp_{}", uuid::Uuid::new_v4().simple()));
-
-    let mut found = false;
-    let mut updated_item = json!({});
-
-    for item in &mut presets {
-        if item.get("id").and_then(|v| v.as_str()) == Some(&preset_id) {
-            if let Some(obj) = item.as_object_mut() {
-                obj.insert("name".to_string(), json!(payload.name));
-                obj.insert("filters".to_string(), payload.filters.clone());
-                obj.insert("updated_at".to_string(), json!(now_str));
-            }
-            updated_item = item.clone();
-            found = true;
-            break;
-        }
-    }
-
-    if !found {
-        updated_item = json!({
-            "id": preset_id,
-            "name": payload.name,
-            "filters": payload.filters,
-            "created_at": now_str,
-            "updated_at": now_str
-        });
-        presets.push(updated_item.clone());
-    }
-
-    let json_str = serde_json::to_string(&presets).map_err(|e| AppError::Internal(e.to_string()))?;
-
-    sqlx::query(
-        "INSERT INTO keyvalue (key, value) VALUES ('file_view_presets', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-    )
-    .bind(json_str)
-    .execute(&state.pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
-
-    Ok(Json(APIResponse::success(updated_item)))
+    let updated = save_view_preset(&state.pool, payload.id, payload.name, payload.filters).await?;
+    Ok(Json(APIResponse::success(updated)))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -1139,23 +979,6 @@ pub async fn file_view_presets_delete_handler(
         }
     }
 
-    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM keyvalue WHERE key = 'file_view_presets'")
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-    if let Some((json_str,)) = row {
-        if let Ok(mut presets) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
-            presets.retain(|item| item.get("id").and_then(|v| v.as_str()) != Some(&preset_id));
-            let new_str = serde_json::to_string(&presets).map_err(|e| AppError::Internal(e.to_string()))?;
-            let _ = sqlx::query(
-                "INSERT INTO keyvalue (key, value) VALUES ('file_view_presets', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-            )
-            .bind(new_str)
-            .execute(&state.pool)
-            .await;
-        }
-    }
-
+    let _ = delete_view_preset(&state.pool, &preset_id).await?;
     Ok(Json(APIResponse::success(json!({ "ok": true }))))
 }

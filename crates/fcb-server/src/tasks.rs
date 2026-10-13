@@ -1,12 +1,15 @@
 use std::time::Duration;
 use chrono::Utc;
 use fcb_core::models::StoredFile;
-use fcb_db::crud::{delete_file_code, get_expired_file_codes};
+use fcb_db::crud::{
+    delete_expired_presign_sessions, delete_expired_reservations, delete_file_code,
+    get_expired_file_codes,
+};
+use fcb_db::DbPool;
 use fcb_storage::FileStorage;
-use sqlx::SqlitePool;
 use tracing::{error, info};
 
-pub async fn start_background_tasks(pool: SqlitePool, storage: FileStorage) {
+pub async fn start_background_tasks(pool: DbPool, storage: FileStorage) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(600)).await;
@@ -40,16 +43,10 @@ pub async fn start_background_tasks(pool: SqlitePool, storage: FileStorage) {
             }
 
             // 2. 清理过期的容量预留
-            let _ = sqlx::query("DELETE FROM storagereservation WHERE expires_at < ?")
-                .bind(now)
-                .execute(&pool)
-                .await;
+            let _ = delete_expired_reservations(&pool, now).await;
 
             // 3. 清理过期的预签名会话
-            let _ = sqlx::query("DELETE FROM presignuploadsession WHERE expires_at < ?")
-                .bind(now)
-                .execute(&pool)
-                .await;
+            let _ = delete_expired_presign_sessions(&pool, now).await;
         }
     });
     info!("Background cleanup tasks started");
