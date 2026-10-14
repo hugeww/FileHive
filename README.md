@@ -64,39 +64,40 @@ docker run -d \
 
 ---
 
-### 方式二：Docker Compose 部署
+### 方式二：Docker Compose 生产级部署（推荐）
 
-1. **下载或创建 `docker-compose.yml`**：
-   ```yaml
-   services:
-     filehive:
-       image: ghcr.io/hugeww/filehive:latest
-       container_name: filehive
-       restart: unless-stopped
-       ports:
-         - "${PORT:-12345}:12345"
-       env_file:
-         - .env
-       volumes:
-         - ./data:/app/data
+1. **准备环境文件与配置**：
+   在部署目录下获取 `docker-compose.yml` 与 `.env`（可直接从项目中的模版复制）：
+
+   ```bash
+   # 复制环境配置文件
+   cp .env.example .env
    ```
 
-2. **配置环境变量 `.env`**：
-   在 `docker-compose.yml` 同级目录下创建 `.env` 文件（或参考项目中的 `.env.example`）：
+   `.env` 配置参数说明：
    ```env
-   # 宿主机映射端口
-   PORT=12345
+   # 镜像版本号（支持指定版本如 0.1 或 latest）
+   FILEHIVE_IMAGE=ghcr.io/hugeww/filehive:0.1
+
+   # 宿主机绑定地址与对外端口
+   BIND_HOST=0.0.0.0
+   SERVER_PORT=12345
 
    # 运行环境与日志级别
    APP_ENV=production
    RUST_LOG=info,filehive_server=info
 
-   # 数据库配置（默认使用挂载的 SQLite）
+   # 数据库配置（默认使用 Docker 托管卷存储 SQLite 数据）
    DATABASE_URL=sqlite:data/filehive.db
 
-   # 若使用外置数据库，可替换为：
-   # DATABASE_URL=postgres://user:password@postgres:5432/filehive
-   # DATABASE_URL=mysql://user:password@mysql:3306/filehive
+   # 若使用宿主机/外置数据库，可配合 host.docker.internal：
+   # DATABASE_URL=postgres://user:password@host.docker.internal:5432/filehive
+   # DATABASE_URL=mysql://user:password@host.docker.internal:3306/filehive
+   ```
+
+2. **创建外部公共网络（若已存在可跳过）**：
+   ```bash
+   docker network create pub-network
    ```
 
 3. **启动服务**：
@@ -106,13 +107,13 @@ docker run -d \
 
 4. **常用维护命令**：
    ```bash
-   # 查看运行日志
-   docker compose logs -f
+   # 查看运行日志与健康状态
+   docker compose logs -f filehive
 
    # 重启服务
    docker compose restart
 
-   # 升级至最新镜像
+   # 升级至新版本（修改 .env 中的 FILEHIVE_IMAGE 后重新拉取）
    docker compose pull && docker compose up -d
    ```
 

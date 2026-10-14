@@ -19,7 +19,7 @@ RUN cargo build --release -p filehive-server
 FROM debian:bookworm-slim
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata sqlite3 libssl3 \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata sqlite3 libssl3 wget curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && echo 'Asia/Shanghai' > /etc/timezone

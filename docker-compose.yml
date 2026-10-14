@@ -1,14 +1,50 @@
+# =============================================================================
+# FileHive Docker Compose - 生产环境标准版（环境变量全部来自 .env）
+# 版本在 .env 的 FILEHIVE_IMAGE 中控制
+#
+# 用法:
+#   docker network create pub-network      # 若外部共享网络不存在则先创建
+#   docker compose up -d
+#   docker compose logs -f filehive
+# =============================================================================
+
 services:
   filehive:
-    image: ghcr.io/hugeww/filehive:latest
+    image: ${FILEHIVE_IMAGE:-ghcr.io/hugeww/filehive:latest}
     container_name: filehive
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
     ports:
-      - "${PORT:-12345}:12345"
+      # 宿主机端口由 .env 的 SERVER_PORT / BIND_HOST 控制；容器内固定监听 12345
+      - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-12345}:12345"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Docker 命名卷（生产推荐，Docker 统一托管，数据保存在 /var/lib/docker/volumes/）
+      - filehive_data:/app/data
     env_file:
       - .env
-    volumes:
-      # 持久化数据目录（包含 SQLite 数据库与本地上传文件）
-      - ./data:/app/data
-      # 如需自定义前端主题，可取消挂载：
-      # - ./themes:/app/themes
+    environment:
+      # 容器内部端口固定 12345（宿主机对外端口在 .env 中修改 SERVER_PORT 即可）
+      - HOST=0.0.0.0
+      - PORT=12345
+    networks:
+      - pub-network
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:12345/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+networks:
+  pub-network:
+    external: true
+
+volumes:
+  filehive_data:
