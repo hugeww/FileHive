@@ -1,6 +1,6 @@
-# FileCodeBox - Rust Edition (`filecodebox-rs`)
+# FileHive - Rust Edition (`FileHive`)
 
-基于 **Axum + SQLx + Apache OpenDAL + Tokio** 的 FileCodeBox 高性能原位平替实现。
+基于 **Axum + SQLx + Apache OpenDAL + Tokio** 的 FileHive 高性能原位平替实现。
 
 ---
 
@@ -9,10 +9,10 @@
 本项目采用 **Cargo Workspace** 多 Crate 分层架构设计，实现了模块化、高解耦与高内聚：
 
 ```
-filecodebox-rs/
+FileHive/
 ├── Cargo.toml                  # Workspace 顶级清单
 ├── Dockerfile                  # 轻量容器多阶段构建
-├── frontend/                   # Vue 3 前端源码 (FileCodeBoxFronted)
+├── frontend/                   # Vue 3 前端源码 (FileHiveFronted)
 ├── themes/                     # 前端编译静态产物 (2024 主题)
 └── crates/
     ├── fcb-core/               # 基础类型、统一定义 (APIResponse, ErrorResponse, AppError, 版本常量)
@@ -28,13 +28,13 @@ filecodebox-rs/
 ## 核心特性与技术亮点
 
 1. **原位平替与数据 100% 兼容**：
-   - 数据表结构完全兼容原版 SQLite `filecodebox.db` (`filecodes`, `uploadchunk`, `keyvalue`, `presignuploadsession`, `storagereservation`)。
+   - 数据表结构完全兼容原版 SQLite `FileHive.db` (`filecodes`, `uploadchunk`, `keyvalue`, `presignuploadsession`, `storagereservation`)。
    - 密码验证严格复现 Python `scrypt$16384$8$1${salt}${hash}` 格式，存量实例更换为 Rust 二进制后可无缝平滑升级，无需重置密码。
 2. **多数据库原生支持 (SQLite / PostgreSQL / MySQL)**：
    - 根据 `DATABASE_URL` 环境变量自动识别底层数据库类型并完成连接池创建与自建表迁移：
-     - SQLite: `sqlite:data/filecodebox.db` 或普通文件路径 `data/filecodebox.db`
-     - PostgreSQL: `postgres://user:password@localhost:5432/filecodebox`
-     - MySQL / MariaDB: `mysql://user:password@localhost:3306/filecodebox`
+     - SQLite: `sqlite:data/FileHive.db` 或普通文件路径 `data/FileHive.db`
+     - PostgreSQL: `postgres://user:password@localhost:5432/FileHive`
+     - MySQL / MariaDB: `mysql://user:password@localhost:3306/FileHive`
 3. **零锁配置管理 (`arc_swap`)**：
    - 读请求完全无锁，管理员修改配置时通过 `ArcSwap` 原子替换全局配置指针，避免读写锁争用。
 4. **原生跨存储支持 (`Apache OpenDAL`)**：
@@ -50,7 +50,7 @@ filecodebox-rs/
 ### 1. 本地编译与测试
 ```bash
 # 进入工作空间
-cd filecodebox-rs
+cd FileHive
 
 # 运行全套单元测试
 cargo test --workspace
@@ -72,19 +72,19 @@ pnpm run build-only # 自动打包至 themes/2024
 ```bash
 export PORT=12345
 export HOST="0.0.0.0"
-export DATABASE_URL="data/filecodebox.db"
+export DATABASE_URL="data/FileHive.db"
 ./target/release/fcb-server
 ```
 
 #### 模式 B: 使用 PostgreSQL
 ```bash
-export DATABASE_URL="postgres://postgres:password@localhost:5432/filecodebox"
+export DATABASE_URL="postgres://postgres:password@localhost:5432/FileHive"
 ./target/release/fcb-server
 ```
 
 #### 模式 C: 使用 MySQL
 ```bash
-export DATABASE_URL="mysql://root:password@localhost:3306/filecodebox"
+export DATABASE_URL="mysql://root:password@localhost:3306/FileHive"
 ./target/release/fcb-server
 ```
 
