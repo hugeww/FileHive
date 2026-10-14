@@ -10,7 +10,7 @@ COPY frontend ./
 RUN pnpm run build-only --outDir /build/themes/2024
 
 # 第二阶段：构建 Rust 二进制
-FROM rust:1.85-bookworm AS rust-builder
+FROM rust:bookworm AS rust-builder
 WORKDIR /app
 COPY . .
 RUN cargo build --release -p filehive-server
