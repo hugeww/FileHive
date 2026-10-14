@@ -45,9 +45,81 @@ FileHive/
 
 ---
 
-## 构建与运行
+## 部署方式
 
-### 1. 本地编译与测试
+### 方式一：Docker 一键运行（推荐）
+
+直接使用一行 Docker 命令启动容器，数据将持久化保存在宿主机的 `$(pwd)/data` 目录：
+
+```bash
+docker run -d \
+  --name filehive \
+  --restart unless-stopped \
+  -p 12345:12345 \
+  -v $(pwd)/data:/app/data \
+  ghcr.io/hugeww/filehive:latest
+```
+
+启动后即可在浏览器访问：`http://服务器IP:12345`。首次进入将自动跳转至系统初始化向导 (`/setup`) 设置管理员密码。
+
+---
+
+### 方式二：Docker Compose 部署
+
+1. **下载或创建 `docker-compose.yml`**：
+   ```yaml
+   services:
+     filehive:
+       image: ghcr.io/hugeww/filehive:latest
+       container_name: filehive
+       restart: unless-stopped
+       ports:
+         - "${PORT:-12345}:12345"
+       env_file:
+         - .env
+       volumes:
+         - ./data:/app/data
+   ```
+
+2. **配置环境变量 `.env`**：
+   在 `docker-compose.yml` 同级目录下创建 `.env` 文件（或参考项目中的 `.env.example`）：
+   ```env
+   # 宿主机映射端口
+   PORT=12345
+
+   # 运行环境与日志级别
+   APP_ENV=production
+   RUST_LOG=info,filehive_server=info
+
+   # 数据库配置（默认使用挂载的 SQLite）
+   DATABASE_URL=sqlite:data/filehive.db
+
+   # 若使用外置数据库，可替换为：
+   # DATABASE_URL=postgres://user:password@postgres:5432/filehive
+   # DATABASE_URL=mysql://user:password@mysql:3306/filehive
+   ```
+
+3. **启动服务**：
+   ```bash
+   docker compose up -d
+   ```
+
+4. **常用维护命令**：
+   ```bash
+   # 查看运行日志
+   docker compose logs -f
+
+   # 重启服务
+   docker compose restart
+
+   # 升级至最新镜像
+   docker compose pull && docker compose up -d
+   ```
+
+---
+
+## 本地编译与运行
+
 ```bash
 # 进入工作空间
 cd FileHive

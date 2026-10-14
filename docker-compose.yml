@@ -1,0 +1,14 @@
+services:
+  filehive:
+    image: ghcr.io/hugeww/filehive:latest
+    container_name: filehive
+    restart: unless-stopped
+    ports:
+      - "${PORT:-12345}:12345"
+    env_file:
+      - .env
+    volumes:
+      # 持久化数据目录（包含 SQLite 数据库与本地上传文件）
+      - ./data:/app/data
+      # 如需自定义前端主题，可取消挂载：
+      # - ./themes:/app/themes
