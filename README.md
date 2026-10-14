@@ -1,6 +1,6 @@
 # FileHive - Rust Edition (`FileHive`)
 
-基于 **Axum + SQLx + Apache OpenDAL + Tokio** 的 FileHive 高性能原位平替实现。
+基于 **Axum + SQLx + Apache OpenDAL + Tokio** 的高性能文件与文本快递柜实现。本项目基于开源项目 [FileCodeBox (vastsa/FileCodeBox)](https://github.com/vastsa/FileCodeBox) 二次开发，提供 100% 数据兼容与 API 兼容的原位平替。
 
 ---
 
@@ -106,3 +106,12 @@ export DATABASE_URL="mysql://root:password@localhost:3306/FileHive"
 | `/setup` | 首次部署系统初始化向导 | ✅ 已实现 |
 | `/` & `/assets/*` | 前端单页应用 (SPA) 动态注入与静态托管 | ✅ 已实现 |
 | `/health` | 服务健康检查 | ✅ 已实现 |
+
+---
+
+## 开源协议与致谢
+
+- 本项目基于 [FileCodeBox](https://github.com/vastsa/FileCodeBox) 进行二次开发与 Rust 高性能重构。
+- 感谢原作者 [vastsa](https://github.com/vastsa) 及所有贡献者的开源工作！
+- 本项目遵循 [LGPL-3.0 License](LICENSE) 开源协议。
+

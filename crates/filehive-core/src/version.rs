@@ -1,7 +1,7 @@
 //! Application version constant.
 
 /// Current FileHive application version.
-pub const APP_VERSION: &str = "2.8.2";
+pub const APP_VERSION: &str = "0.1.0";
 
 #[cfg(test)]
 mod tests {
@@ -9,6 +9,6 @@ mod tests {
 
     #[test]
     fn test_version_value() {
-        assert_eq!(APP_VERSION, "2.8.2");
+        assert_eq!(APP_VERSION, "0.1.0");
     }
 }
