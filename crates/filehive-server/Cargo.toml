@@ -9,10 +9,6 @@ license.workspace = true
 name = "filehive"
 path = "src/main.rs"
 
-[[bin]]
-name = "fcb-server"
-path = "src/main.rs"
-
 [dependencies]
 filehive-core = { workspace = true, features = ["axum"] }
 filehive-storage = { workspace = true }
