@@ -109,10 +109,10 @@ const { password, isLoading, handleSubmit } = useAdminLogin()
 
 const getRedirectPath = () => {
   const redirect = route.query.redirect
-  if (typeof redirect === 'string' && redirect.startsWith('/')) {
+  if (typeof redirect === 'string' && redirect.startsWith('/') && redirect !== '/' && redirect !== ROUTES.LOGIN) {
     return redirect
   }
-  return ROUTES.ADMIN
+  return ROUTES.DASHBOARD
 }
 
 const submitLogin = async () => {

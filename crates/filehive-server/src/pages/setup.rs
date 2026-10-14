@@ -218,29 +218,35 @@ pub async fn setup_post_handler(
 
     state.config.update(update_json).await?;
 
+    let token = filehive_security::create_jwt_token(&jwt_secret, 2592000)?;
+    let claims = filehive_security::verify_jwt_token(&token, &jwt_secret)?;
+
     if accept.contains("application/json") {
         Ok(Json(APIResponse::success(json!({
             "ok": true,
-            "admin": "/#/admin"
+            "admin": "/#/admin/dashboard",
+            "token": token,
+            "expires_at": claims.exp
         })))
         .into_response())
     } else {
-        let success_html = r#"<!DOCTYPE html>
+        let success_html = format!(
+            r#"<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <title>初始化完成 - FileHive</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .card { background: white; padding: 36px 32px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); width: 100%; max-width: 440px; text-align: center; }
-        h2 { margin-top: 0; color: #1f2937; font-size: 22px; }
-        p { color: #4b5563; font-size: 15px; line-height: 1.6; margin: 16px 0 28px; }
-        .btn-group { display: flex; flex-direction: column; gap: 12px; }
-        .btn { display: inline-flex; align-items: center; justify-content: center; padding: 12px 20px; border-radius: 8px; font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer; transition: all 0.2s; }
-        .btn-primary { background: #2563eb; color: white; }
-        .btn-primary:hover { background: #1d4ed8; }
-        .btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
-        .btn-secondary:hover { background: #e5e7eb; }
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }}
+        .card {{ background: white; padding: 36px 32px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); width: 100%; max-width: 440px; text-align: center; }}
+        h2 {{ margin-top: 0; color: #1f2937; font-size: 22px; }}
+        p {{ color: #4b5563; font-size: 15px; line-height: 1.6; margin: 16px 0 28px; }}
+        .btn-group {{ display: flex; flex-direction: column; gap: 12px; }}
+        .btn {{ display: inline-flex; align-items: center; justify-content: center; padding: 12px 20px; border-radius: 8px; font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer; transition: all 0.2s; }}
+        .btn-primary {{ background: #2563eb; color: white; }}
+        .btn-primary:hover {{ background: #1d4ed8; }}
+        .btn-secondary {{ background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }}
+        .btn-secondary:hover {{ background: #e5e7eb; }}
     </style>
 </head>
 <body>
@@ -252,8 +258,16 @@ pub async fn setup_post_handler(
             <a href="/" class="btn btn-secondary">前往文件提取首页 (/)</a>
         </div>
     </div>
+    <script>
+        try {{
+            localStorage.setItem('token', '{}');
+            localStorage.setItem('tokenExpiresAt', '{}');
+        }} catch (e) {{}}
+    </script>
 </body>
-</html>"#;
+</html>"#,
+            token, claims.exp
+        );
         Ok(Html(success_html).into_response())
     }
 }
