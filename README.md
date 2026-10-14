@@ -12,15 +12,15 @@
 FileHive/
 ├── Cargo.toml                  # Workspace 顶级清单
 ├── Dockerfile                  # 轻量容器多阶段构建
-├── frontend/                   # Vue 3 前端源码 (FileHiveFronted)
+├── frontend/                   # Vue 3 前端源码 (FileHiveFrontend)
 ├── themes/                     # 前端编译静态产物 (2024 主题)
 └── crates/
-    ├── fcb-core/               # 基础类型、统一定义 (APIResponse, ErrorResponse, AppError, 版本常量)
-    ├── fcb-storage/            # 基于 Apache OpenDAL 的统一多存储驱动 (Local, S3, WebDAV, OneDrive)
-    ├── fcb-db/                 # 多数据库连接池 (SQLite / PostgreSQL / MySQL) 与全套 CRUD
-    ├── fcb-security/           # scrypt 密码哈希兼容、JWT 鉴权、出站 SSRF 防御
-    ├── fcb-config/             # 基于 ArcSwap 的零锁配置热更新、内存滑动窗口 IP 限流、配额管理
-    └── fcb-server/             # Axum 业务服务 (分发 /share, /chunk, /presign, /admin, /mcp, /setup)
+    ├── filehive-core/          # 基础类型、统一定义 (APIResponse, ErrorResponse, AppError, 版本常量)
+    ├── filehive-storage/       # 基于 Apache OpenDAL 的统一多存储驱动 (Local, S3, WebDAV, OneDrive)
+    ├── filehive-db/            # 多数据库连接池 (SQLite / PostgreSQL / MySQL) 与全套 CRUD
+    ├── filehive-security/      # scrypt 密码哈希兼容、JWT 鉴权、出站 SSRF 防御
+    ├── filehive-config/        # 基于 ArcSwap 的零锁配置热更新、内存滑动窗口 IP 限流、配额管理
+    └── filehive-server/        # Axum 业务服务 (分发 /share, /chunk, /presign, /admin, /mcp, /setup)
 ```
 
 ---
@@ -56,7 +56,7 @@ cd FileHive
 cargo test --workspace
 
 # 编译服务器二进制
-cargo build --release -p fcb-server
+cargo build --release -p filehive-server
 ```
 
 ### 2. 前端构建 (可选自定义)
@@ -73,19 +73,19 @@ pnpm run build-only # 自动打包至 themes/2024
 export PORT=12345
 export HOST="0.0.0.0"
 export DATABASE_URL="data/FileHive.db"
-./target/release/fcb-server
+./target/release/filehive
 ```
 
 #### 模式 B: 使用 PostgreSQL
 ```bash
 export DATABASE_URL="postgres://postgres:password@localhost:5432/FileHive"
-./target/release/fcb-server
+./target/release/filehive
 ```
 
 #### 模式 C: 使用 MySQL
 ```bash
 export DATABASE_URL="mysql://root:password@localhost:3306/FileHive"
-./target/release/fcb-server
+./target/release/filehive
 ```
 
 ---

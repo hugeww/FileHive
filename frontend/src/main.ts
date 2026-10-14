@@ -8,14 +8,14 @@ import router from './router'
 import i18n from './i18n'
 
 const OPEN_SOURCE_BANNER = String.raw`
-  ______ _ _      _____          _      ____            
- |  ____(_) |    / ____|        | |    |  _ \           
- | |__   _| | ___| |     ___   __| | ___| |_) | _____  __
- |  __| | | |/ _ \ |    / _ \ / _\` |/ _ \  _ < / _ \ \/ /
- | |    | | |  __/ |___| (_) | (_| |  __/ |_) | (_) >  < 
- |_|    |_|_|\___|\_____\___/ \__,_|\___|____/ \___/_/\_\
+  ______ _ _      _    _ _           
+ |  ____(_) |    | |  | (_)          
+ | |__   _| | ___| |__| |_ _   _____ 
+ |  __| | | |/ _ \  __  | \ \ / / _ \
+ | |    | | |  __/ |  | | |\ V /  __/
+ |_|    |_|_|\___|_|  |_|_| \_/ \___|
 
- Open Source: https://github.com/vastsa/FileCodeBox
+ FileHive - Fast & Lightweight File Sharing powered by Rust
 `
 
 console.info(OPEN_SOURCE_BANNER)

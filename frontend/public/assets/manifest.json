@@ -1,7 +1,7 @@
 {
-  "name": "FileCodeBox",
-  "short_name": "FileCodeBox",
-  "description": "FileCodeBox file transfer",
+  "name": "FileHive",
+  "short_name": "FileHive",
+  "description": "FileHive file transfer",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

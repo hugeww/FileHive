@@ -4,8 +4,8 @@ import type { ApiErrorPayload } from '@/types'
 import { clearStoredToken, hasValidStoredAdminSession, readStoredToken } from '@/utils/auth-storage'
 
 export const AUTH_EVENTS = {
-  UNAUTHORIZED: 'filecodebox:auth:unauthorized',
-  SETUP_REQUIRED: 'filecodebox:setup:required'
+  UNAUTHORIZED: 'filehive:auth:unauthorized',
+  SETUP_REQUIRED: 'filehive:setup:required'
 } as const
 
 const rawBaseURL =

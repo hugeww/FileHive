@@ -13,7 +13,7 @@ RUN pnpm run build-only --outDir /build/themes/2024
 FROM rust:1.85-bookworm AS rust-builder
 WORKDIR /app
 COPY . .
-RUN cargo build --release -p fcb-server
+RUN cargo build --release -p filehive-server
 
 # 第三阶段：极简运行环境 (仅 libc + ca-certificates + sqlite)
 FROM debian:bookworm-slim
@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && echo 'Asia/Shanghai' > /etc/timezone
 
 COPY --from=frontend-builder /build/themes/2024 ./themes/2024
-COPY --from=rust-builder /app/target/release/fcb-server /usr/local/bin/fcb-server
+COPY --from=rust-builder /app/target/release/filehive /usr/local/bin/filehive
 
 ENV HOST="0.0.0.0" \
     PORT=12345 \
@@ -33,4 +33,4 @@ ENV HOST="0.0.0.0" \
 
 EXPOSE 12345
 
-CMD ["fcb-server"]
+CMD ["filehive"]

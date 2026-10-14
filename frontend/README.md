@@ -1,4 +1,4 @@
-# filecodeboxfronted
+# FileHive Frontend
 
 This template should help get you started developing with Vue 3 in Vite.
 
@@ -30,7 +30,7 @@ The frontend version comes from `package.json`. Production builds also embed the
 current Git commit. CI can override these values with `VITE_APP_VERSION` and
 `VITE_GIT_COMMIT`.
 
-The FileCodeBox product release workflow builds the latest commit from this
+The FileHive product release workflow builds the latest commit from this
 repository's default branch. Every push is also checked with a production build.
 
 ### Type-Check, Compile and Minify for Production

@@ -1,11 +1,11 @@
 [workspace]
 members = [
-    "crates/fcb-core",
-    "crates/fcb-storage",
-    "crates/fcb-db",
-    "crates/fcb-security",
-    "crates/fcb-config",
-    "crates/fcb-server",
+    "crates/filehive-core",
+    "crates/filehive-storage",
+    "crates/filehive-db",
+    "crates/filehive-security",
+    "crates/filehive-config",
+    "crates/filehive-server",
 ]
 resolver = "2"
 
@@ -51,8 +51,8 @@ rust-embed = "8.5"
 http = "1.2"
 
 dotenvy = "0.15"
-fcb-core = { path = "crates/fcb-core" }
-fcb-storage = { path = "crates/fcb-storage" }
-fcb-db = { path = "crates/fcb-db" }
-fcb-security = { path = "crates/fcb-security" }
-fcb-config = { path = "crates/fcb-config" }
+filehive-core = { path = "crates/filehive-core" }
+filehive-storage = { path = "crates/filehive-storage" }
+filehive-db = { path = "crates/filehive-db" }
+filehive-security = { path = "crates/filehive-security" }
+filehive-config = { path = "crates/filehive-config" }

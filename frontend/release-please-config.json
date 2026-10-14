@@ -3,7 +3,7 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "package-name": "filecodebox-frontend",
+      "package-name": "filehive-frontend",
       "include-component-in-tag": false,
       "changelog-path": "CHANGELOG.md"
     }
