@@ -95,17 +95,12 @@ docker run -d \
    # DATABASE_URL=mysql://user:password@host.docker.internal:3306/filehive
    ```
 
-2. **创建外部公共网络（若已存在可跳过）**：
-   ```bash
-   docker network create pub-network
-   ```
-
-3. **启动服务**：
+2. **启动服务**：
    ```bash
    docker compose up -d
    ```
 
-4. **常用维护命令**：
+3. **常用维护命令**：
    ```bash
    # 查看运行日志与健康状态
    docker compose logs -f filehive

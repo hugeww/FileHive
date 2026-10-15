@@ -3,7 +3,6 @@
 # 版本在 .env 的 FILEHIVE_IMAGE 中控制
 #
 # 用法:
-#   docker network create pub-network      # 若外部共享网络不存在则先创建
 #   docker compose up -d
 #   docker compose logs -f filehive
 # =============================================================================
@@ -33,18 +32,12 @@ services:
       # 容器内部端口固定 12345（宿主机对外端口在 .env 中修改 SERVER_PORT 即可）
       - HOST=0.0.0.0
       - PORT=12345
-    networks:
-      - pub-network
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:12345/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 15s
-
-networks:
-  pub-network:
-    external: true
 
 volumes:
   filehive_data:
