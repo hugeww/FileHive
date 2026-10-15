@@ -12,7 +12,7 @@ pub async fn run_migrations(pool: &DbPool) -> Result<(), AppError> {
 }
 
 pub async fn run_sqlite_migrations(pool: &SqlitePool) -> Result<(), AppError> {
-    sqlx::query(
+    let queries = [
         r#"
         CREATE TABLE IF NOT EXISTS filecodes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,8 +31,9 @@ pub async fn run_sqlite_migrations(pool: &SqlitePool) -> Result<(), AppError> {
             is_chunked BOOLEAN DEFAULT 0,
             upload_id TEXT
         );
-        CREATE INDEX IF NOT EXISTS idx_filecodes_code ON filecodes(code);
-
+        "#,
+        "CREATE INDEX IF NOT EXISTS idx_filecodes_code ON filecodes(code);",
+        r#"
         CREATE TABLE IF NOT EXISTS uploadchunk (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             upload_id TEXT,
@@ -46,16 +47,18 @@ pub async fn run_sqlite_migrations(pool: &SqlitePool) -> Result<(), AppError> {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             completed BOOLEAN DEFAULT 0
         );
-        CREATE INDEX IF NOT EXISTS idx_uploadchunk_upload_id ON uploadchunk(upload_id);
-
+        "#,
+        "CREATE INDEX IF NOT EXISTS idx_uploadchunk_upload_id ON uploadchunk(upload_id);",
+        r#"
         CREATE TABLE IF NOT EXISTS keyvalue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             key TEXT UNIQUE,
             value TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE INDEX IF NOT EXISTS idx_keyvalue_key ON keyvalue(key);
-
+        "#,
+        "CREATE INDEX IF NOT EXISTS idx_keyvalue_key ON keyvalue(key);",
+        r#"
         CREATE TABLE IF NOT EXISTS presignuploadsession (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             upload_id TEXT UNIQUE,
@@ -68,33 +71,39 @@ pub async fn run_sqlite_migrations(pool: &SqlitePool) -> Result<(), AppError> {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             expires_at TIMESTAMP
         );
-        CREATE INDEX IF NOT EXISTS idx_presignuploadsession_upload_id ON presignuploadsession(upload_id);
-
+        "#,
+        "CREATE INDEX IF NOT EXISTS idx_presignuploadsession_upload_id ON presignuploadsession(upload_id);",
+        r#"
         CREATE TABLE IF NOT EXISTS storagereservation (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             token TEXT UNIQUE,
             size INTEGER,
             expires_at TIMESTAMP
         );
-        CREATE INDEX IF NOT EXISTS idx_storagereservation_token ON storagereservation(token);
-        CREATE INDEX IF NOT EXISTS idx_storagereservation_expires_at ON storagereservation(expires_at);
-
+        "#,
+        "CREATE INDEX IF NOT EXISTS idx_storagereservation_token ON storagereservation(token);",
+        "CREATE INDEX IF NOT EXISTS idx_storagereservation_expires_at ON storagereservation(expires_at);",
+        r#"
         CREATE TABLE IF NOT EXISTS migrates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             migration_file TEXT UNIQUE,
             executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         "#,
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to run SQLite migrations: {}", e)))?;
+    ];
+
+    for q in queries {
+        sqlx::query(q)
+            .execute(pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to run SQLite migration: {}", e)))?;
+    }
 
     Ok(())
 }
 
 pub async fn run_postgres_migrations(pool: &PgPool) -> Result<(), AppError> {
-    sqlx::query(
+    let queries = [
         r#"
         CREATE TABLE IF NOT EXISTS filecodes (
             id BIGSERIAL PRIMARY KEY,
@@ -113,8 +122,9 @@ pub async fn run_postgres_migrations(pool: &PgPool) -> Result<(), AppError> {
             is_chunked BOOLEAN DEFAULT FALSE,
             upload_id VARCHAR(36)
         );
-        CREATE INDEX IF NOT EXISTS idx_filecodes_code ON filecodes(code);
-
+        "#,
+        "CREATE INDEX IF NOT EXISTS idx_filecodes_code ON filecodes(code);",
+        r#"
         CREATE TABLE IF NOT EXISTS uploadchunk (
             id BIGSERIAL PRIMARY KEY,
             upload_id VARCHAR(36) NOT NULL,
@@ -128,16 +138,18 @@ pub async fn run_postgres_migrations(pool: &PgPool) -> Result<(), AppError> {
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
             completed BOOLEAN DEFAULT FALSE
         );
-        CREATE INDEX IF NOT EXISTS idx_uploadchunk_upload_id ON uploadchunk(upload_id);
-
+        "#,
+        "CREATE INDEX IF NOT EXISTS idx_uploadchunk_upload_id ON uploadchunk(upload_id);",
+        r#"
         CREATE TABLE IF NOT EXISTS keyvalue (
             id BIGSERIAL PRIMARY KEY,
             key VARCHAR(255) NOT NULL UNIQUE,
             value TEXT,
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE INDEX IF NOT EXISTS idx_keyvalue_key ON keyvalue(key);
-
+        "#,
+        "CREATE INDEX IF NOT EXISTS idx_keyvalue_key ON keyvalue(key);",
+        r#"
         CREATE TABLE IF NOT EXISTS presignuploadsession (
             id BIGSERIAL PRIMARY KEY,
             upload_id VARCHAR(36) NOT NULL UNIQUE,
@@ -150,27 +162,33 @@ pub async fn run_postgres_migrations(pool: &PgPool) -> Result<(), AppError> {
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
             expires_at TIMESTAMPTZ NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_presignuploadsession_upload_id ON presignuploadsession(upload_id);
-
+        "#,
+        "CREATE INDEX IF NOT EXISTS idx_presignuploadsession_upload_id ON presignuploadsession(upload_id);",
+        r#"
         CREATE TABLE IF NOT EXISTS storagereservation (
             id BIGSERIAL PRIMARY KEY,
             token VARCHAR(64) NOT NULL UNIQUE,
             size BIGINT NOT NULL,
             expires_at TIMESTAMPTZ NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_storagereservation_token ON storagereservation(token);
-        CREATE INDEX IF NOT EXISTS idx_storagereservation_expires_at ON storagereservation(expires_at);
-
+        "#,
+        "CREATE INDEX IF NOT EXISTS idx_storagereservation_token ON storagereservation(token);",
+        "CREATE INDEX IF NOT EXISTS idx_storagereservation_expires_at ON storagereservation(expires_at);",
+        r#"
         CREATE TABLE IF NOT EXISTS migrates (
             id BIGSERIAL PRIMARY KEY,
             migration_file VARCHAR(255) NOT NULL UNIQUE,
             executed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         "#,
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to run PostgreSQL migrations: {}", e)))?;
+    ];
+
+    for q in queries {
+        sqlx::query(q)
+            .execute(pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to run PostgreSQL migration: {}", e)))?;
+    }
 
     Ok(())
 }
