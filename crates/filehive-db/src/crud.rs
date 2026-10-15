@@ -442,14 +442,14 @@ pub async fn sum_total_storage_size(pool: &DbPool) -> Result<i64, AppError> {
         }
         DbPool::Postgres(p) => {
             sqlx::query_as(
-                "SELECT SUM(size) FROM filecodes WHERE file_path IS NULL OR file_path != 'local-ref'",
+                "SELECT (SUM(size))::BIGINT FROM filecodes WHERE file_path IS NULL OR file_path != 'local-ref'",
             )
             .fetch_one(p)
             .await
         }
         DbPool::MySql(p) => {
             sqlx::query_as(
-                "SELECT SUM(size) FROM filecodes WHERE file_path IS NULL OR file_path != 'local-ref'",
+                "SELECT CAST(SUM(size) AS SIGNED) FROM filecodes WHERE file_path IS NULL OR file_path != 'local-ref'",
             )
             .fetch_one(p)
             .await
@@ -464,8 +464,16 @@ pub async fn sum_total_storage_size(pool: &DbPool) -> Result<i64, AppError> {
 pub async fn sum_total_used_count(pool: &DbPool) -> Result<i64, AppError> {
     let row: (Option<i64>,) = match pool {
         DbPool::Sqlite(p) => sqlx::query_as("SELECT SUM(used_count) FROM filecodes").fetch_one(p).await,
-        DbPool::Postgres(p) => sqlx::query_as("SELECT SUM(used_count) FROM filecodes").fetch_one(p).await,
-        DbPool::MySql(p) => sqlx::query_as("SELECT SUM(used_count) FROM filecodes").fetch_one(p).await,
+        DbPool::Postgres(p) => {
+            sqlx::query_as("SELECT (SUM(used_count))::BIGINT FROM filecodes")
+                .fetch_one(p)
+                .await
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as("SELECT CAST(SUM(used_count) AS SIGNED) FROM filecodes")
+                .fetch_one(p)
+                .await
+        }
     }
     .map_err(|e| AppError::Database(format!("Failed to sum used count: {}", e)))?;
 
@@ -863,7 +871,7 @@ pub async fn sum_active_reserved_size(pool: &DbPool, now: DateTime<Utc>) -> Resu
         }
         DbPool::Postgres(p) => {
             sqlx::query_as(
-                "SELECT SUM(size) FROM storagereservation WHERE expires_at > $1",
+                "SELECT (SUM(size))::BIGINT FROM storagereservation WHERE expires_at > $1",
             )
             .bind(now)
             .fetch_one(p)
@@ -871,7 +879,7 @@ pub async fn sum_active_reserved_size(pool: &DbPool, now: DateTime<Utc>) -> Resu
         }
         DbPool::MySql(p) => {
             sqlx::query_as(
-                "SELECT SUM(size) FROM storagereservation WHERE expires_at > ?",
+                "SELECT CAST(SUM(size) AS SIGNED) FROM storagereservation WHERE expires_at > ?",
             )
             .bind(now)
             .fetch_one(p)
