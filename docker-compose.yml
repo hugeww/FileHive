@@ -12,12 +12,6 @@ services:
     image: ${FILEHIVE_IMAGE:-ghcr.io/hugeww/filehive:latest}
     container_name: filehive
     restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    ulimits:
-      nofile:
-        soft: 100000
-        hard: 100000
     ports:
       # 宿主机端口由 .env 的 SERVER_PORT / BIND_HOST 控制；容器内固定监听 12345
       - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-12345}:12345"
@@ -28,10 +22,6 @@ services:
       - filehive_data:/app/data
     env_file:
       - .env
-    environment:
-      # 容器内部端口固定 12345（宿主机对外端口在 .env 中修改 SERVER_PORT 即可）
-      - HOST=0.0.0.0
-      - PORT=12345
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:12345/health"]
       interval: 30s
