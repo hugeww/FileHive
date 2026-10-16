@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::{Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{Json, Response},
 };
 use chrono::{DateTime, Duration, Utc};
@@ -1005,6 +1005,7 @@ pub struct AdminFileQuery {
 pub async fn file_download_handler(
     _auth: AdminAuth,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<AdminFileQuery>,
 ) -> Result<Response, AppError> {
     let item = get_file_code_by_id(&state.pool, query.id)
@@ -1036,7 +1037,13 @@ pub async fn file_download_handler(
         return Err(AppError::NotFound("文件存储路径不存在".to_string()));
     }
 
-    let data = state.storage.read_file(&full_path).await?;
+    let total_size = if item.size > 0 {
+        item.size as u64
+    } else {
+        let meta = state.storage.read_file(&full_path).await?;
+        meta.len() as u64
+    };
+
     let filename = if !item.suffix.is_empty() {
         item.suffix.clone()
     } else {
@@ -1053,10 +1060,55 @@ pub async fn file_download_handler(
         filename, encoded_filename
     );
 
+    // Range 支持
+    let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
+    if let Some(range_str) = range_header {
+        if let Some(range_spec) = range_str.strip_prefix("bytes=") {
+            let parts: Vec<&str> = range_spec.split('-').collect();
+            if parts.len() == 2 {
+                let start_res = parts[0].parse::<u64>();
+                let end_res = if parts[1].is_empty() {
+                    Ok(total_size.saturating_sub(1))
+                } else {
+                    parts[1].parse::<u64>()
+                };
+
+                if let (Ok(start), Ok(end)) = (start_res, end_res) {
+                    if start <= end && start < total_size {
+                        let end = end.min(total_size - 1);
+                        let range_len = end - start + 1;
+
+                        let chunk_bytes = state
+                            .storage
+                            .read_file_range(&full_path, start..(end + 1))
+                            .await?;
+
+                        let response = Response::builder()
+                            .status(StatusCode::PARTIAL_CONTENT)
+                            .header(header::CONTENT_TYPE, mime_type)
+                            .header(header::CONTENT_DISPOSITION, disposition)
+                            .header(header::ACCEPT_RANGES, "bytes")
+                            .header(
+                                header::CONTENT_RANGE,
+                                format!("bytes {}-{}/{}", start, end, total_size),
+                            )
+                            .header(header::CONTENT_LENGTH, range_len.to_string())
+                            .body(Body::from(chunk_bytes))
+                            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+                        return Ok(response);
+                    }
+                }
+            }
+        }
+    }
+
+    let data = state.storage.read_file(&full_path).await?;
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, mime_type)
         .header(header::CONTENT_DISPOSITION, disposition)
+        .header(header::ACCEPT_RANGES, "bytes")
         .header(header::CONTENT_LENGTH, data.len().to_string())
         .body(Body::from(data))
         .map_err(|e| AppError::Internal(e.to_string()))

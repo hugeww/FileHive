@@ -1,10 +1,32 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import type { ReceivedFileRecord, SentFileRecord } from '@/types'
+import { STORAGE_KEYS } from '@/constants'
+import { readStoredRecords, writeStoredRecords } from '@/utils/record-storage'
 
 export const useFileDataStore = defineStore('fileData', () => {
-  const receiveData = ref<ReceivedFileRecord[]>([])
-  const shareData = ref<SentFileRecord[]>([])
+  const receiveData = ref<ReceivedFileRecord[]>(
+    readStoredRecords<ReceivedFileRecord>(STORAGE_KEYS.RECEIVE_RECORDS)
+  )
+  const shareData = ref<SentFileRecord[]>(
+    readStoredRecords<SentFileRecord>(STORAGE_KEYS.SHARE_RECORDS)
+  )
+
+  watch(
+    receiveData,
+    (records) => {
+      writeStoredRecords(STORAGE_KEYS.RECEIVE_RECORDS, records)
+    },
+    { deep: true }
+  )
+
+  watch(
+    shareData,
+    (records) => {
+      writeStoredRecords(STORAGE_KEYS.SHARE_RECORDS, records)
+    },
+    { deep: true }
+  )
 
   const addReceiveData = (record: ReceivedFileRecord) => {
     receiveData.value.push(record)

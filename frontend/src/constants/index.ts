@@ -7,7 +7,9 @@ export const STORAGE_KEYS = {
   TOKEN: 'token',
   TOKEN_EXPIRES_AT: 'tokenExpiresAt',
   CONFIG: 'config',
-  NOTIFY: 'notify'
+  NOTIFY: 'notify',
+  RECEIVE_RECORDS: 'filehive_receive_records',
+  SHARE_RECORDS: 'filehive_share_records'
 } as const
 
 // 主题模式

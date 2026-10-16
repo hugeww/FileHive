@@ -27,6 +27,7 @@ pub trait FileStorageTrait: Send + Sync {
         content_type: Option<&str>,
     ) -> Result<(), AppError>;
     async fn read_file(&self, path: &str) -> Result<Bytes, AppError>;
+    async fn read_file_range(&self, path: &str, range: std::ops::Range<u64>) -> Result<Bytes, AppError>;
     async fn reader(&self, path: &str) -> Result<opendal::Reader, AppError>;
     async fn delete_file(&self, path: &str) -> Result<(), AppError>;
     async fn file_exists(&self, path: &str) -> Result<bool, AppError>;
@@ -242,6 +243,30 @@ impl StorageDriver {
                 _ => AppError::StorageError {
                     status_code: 500,
                     detail: format!("Failed to read file {}: {}", path, e),
+                },
+            })?;
+        Ok(buf.to_bytes())
+    }
+
+    /// 分段读取文件内容 (支持 HTTP Range 断点续传)
+    pub async fn read_file_range(&self, path: &str, range: std::ops::Range<u64>) -> Result<Bytes, AppError> {
+        let clean_path = path.trim_start_matches('/');
+        let buf = self
+            .operator
+            .load()
+            .read_with(clean_path)
+            .range(range)
+            .await
+            .map_err(|e| match e.kind() {
+                opendal::ErrorKind::NotFound => {
+                    AppError::NotFound(format!("File not found {}: {}", path, e))
+                }
+                opendal::ErrorKind::PermissionDenied => {
+                    AppError::Forbidden(format!("Permission denied for file {}: {}", path, e))
+                }
+                _ => AppError::StorageError {
+                    status_code: 500,
+                    detail: format!("Failed to read range for {}: {}", path, e),
                 },
             })?;
         Ok(buf.to_bytes())
@@ -466,6 +491,10 @@ impl FileStorageTrait for StorageDriver {
 
     async fn read_file(&self, path: &str) -> Result<Bytes, AppError> {
         self.read_file(path).await
+    }
+
+    async fn read_file_range(&self, path: &str, range: std::ops::Range<u64>) -> Result<Bytes, AppError> {
+        self.read_file_range(path, range).await
     }
 
     async fn reader(&self, path: &str) -> Result<opendal::Reader, AppError> {

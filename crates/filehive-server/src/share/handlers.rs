@@ -293,6 +293,7 @@ pub struct DownloadQuery {
 
 pub async fn download_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<DownloadQuery>,
 ) -> Result<Response, AppError> {
     let code = query.code.unwrap_or_default().trim().to_string();
@@ -308,7 +309,12 @@ pub async fn download_handler(
         .ok_or_else(|| AppError::NotFound("文件不存在".to_string()))?;
 
     let full_path = item.get_file_path();
-    let data = state.storage.read_file(&full_path).await?;
+    let total_size = if item.size > 0 {
+        item.size as u64
+    } else {
+        let meta = state.storage.read_file(&full_path).await?;
+        meta.len() as u64
+    };
 
     let mime_type = from_path(&item.suffix)
         .first_or_octet_stream()
@@ -323,10 +329,64 @@ pub async fn download_handler(
         disp_type, item.suffix, encoded_filename
     );
 
+    // 检查是否带有 Range 请求头 (形如: Range: bytes=0-1023 或 bytes=1024-)
+    let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
+    if let Some(range_str) = range_header {
+        if let Some(range_spec) = range_str.strip_prefix("bytes=") {
+            let parts: Vec<&str> = range_spec.split('-').collect();
+            if parts.len() == 2 {
+                let start_res = parts[0].parse::<u64>();
+                let end_res = if parts[1].is_empty() {
+                    Ok(total_size.saturating_sub(1))
+                } else {
+                    parts[1].parse::<u64>()
+                };
+
+                if let (Ok(start), Ok(end)) = (start_res, end_res) {
+                    if start <= end && start < total_size {
+                        let end = end.min(total_size - 1);
+                        let range_len = end - start + 1;
+
+                        let chunk_bytes = state
+                            .storage
+                            .read_file_range(&full_path, start..(end + 1))
+                            .await?;
+
+                        let response = Response::builder()
+                            .status(StatusCode::PARTIAL_CONTENT)
+                            .header(header::CONTENT_TYPE, mime_type)
+                            .header(header::CONTENT_DISPOSITION, disposition)
+                            .header(header::ACCEPT_RANGES, "bytes")
+                            .header(
+                                header::CONTENT_RANGE,
+                                format!("bytes {}-{}/{}", start, end, total_size),
+                            )
+                            .header(header::CONTENT_LENGTH, range_len.to_string())
+                            .body(Body::from(chunk_bytes))
+                            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+                        return Ok(response);
+                    } else {
+                        // 请求范围不合法，返回 416 Range Not Satisfiable
+                        let response = Response::builder()
+                            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                            .header(header::CONTENT_RANGE, format!("bytes */{}", total_size))
+                            .body(Body::empty())
+                            .map_err(|e| AppError::Internal(e.to_string()))?;
+                        return Ok(response);
+                    }
+                }
+            }
+        }
+    }
+
+    // 普通全量下载 (200 OK)
+    let data = state.storage.read_file(&full_path).await?;
     let response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, mime_type)
         .header(header::CONTENT_DISPOSITION, disposition)
+        .header(header::ACCEPT_RANGES, "bytes")
         .header(header::CONTENT_LENGTH, data.len().to_string())
         .body(Body::from(data))
         .map_err(|e| AppError::Internal(e.to_string()))?;

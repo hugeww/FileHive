@@ -51,6 +51,10 @@ mod tests {
         let read_buf = r.read(..).await.unwrap();
         assert_eq!(read_buf.to_bytes(), payload);
 
+        // 4.1 测试 read_file_range
+        let range_buf = storage.read_file_range("test.txt", 0..5).await.unwrap();
+        assert_eq!(range_buf, Bytes::from("hello"));
+
         // 5. 删除文件
         storage.delete_file("test.txt").await.unwrap();
         assert!(!storage.file_exists("test.txt").await.unwrap());
