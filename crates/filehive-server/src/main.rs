@@ -11,7 +11,7 @@ mod tasks;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{middleware::from_fn_with_state, Router};
+use axum::{extract::DefaultBodyLimit, middleware::from_fn_with_state, Router};
 use filehive_config::{ConfigManager, RateLimiter};
 use filehive_db::init_pool;
 use filehive_storage::FileStorage;
@@ -77,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
             app_state.clone(),
             middleware::setup_guard_middleware,
         ))
+        .layer(DefaultBodyLimit::disable())
         .layer(CorsLayer::permissive())
         .fallback(pages::handlers::spa_fallback_handler)
         .with_state(app_state);
