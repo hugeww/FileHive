@@ -106,7 +106,11 @@ const extension = computed(() => props.record?.filename.split('.').pop()?.toLowe
 const downloadUrl = computed(() =>
   props.record?.downloadUrl ? buildDownloadUrl(props.record.downloadUrl) : ''
 )
-const previewUrl = computed(() => downloadUrl.value)
+const previewUrl = computed(() => {
+  if (!downloadUrl.value) return ''
+  const delimiter = downloadUrl.value.includes('?') ? '&' : '?'
+  return `${downloadUrl.value}${delimiter}inline=1`
+})
 const mediaType = computed(() => {
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(extension.value)) return 'image'
   if (['mp4', 'webm', 'ogg', 'mov', 'm4v'].includes(extension.value)) return 'video'

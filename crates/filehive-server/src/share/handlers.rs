@@ -287,6 +287,8 @@ async fn process_select(
 pub struct DownloadQuery {
     pub code: Option<String>,
     pub key: Option<String>,
+    #[serde(default)]
+    pub inline: Option<i32>,
 }
 
 pub async fn download_handler(
@@ -312,10 +314,13 @@ pub async fn download_handler(
         .first_or_octet_stream()
         .to_string();
 
+    let is_inline = query.inline.unwrap_or(0) == 1;
+    let disp_type = if is_inline { "inline" } else { "attachment" };
+
     let encoded_filename = utf8_percent_encode(&item.suffix, NON_ALPHANUMERIC).to_string();
     let disposition = format!(
-        "attachment; filename=\"{}\"; filename*=UTF-8''{}",
-        item.suffix, encoded_filename
+        "{}; filename=\"{}\"; filename*=UTF-8''{}",
+        disp_type, item.suffix, encoded_filename
     );
 
     let response = Response::builder()
