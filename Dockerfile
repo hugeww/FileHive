@@ -15,11 +15,11 @@ WORKDIR /app
 COPY . .
 RUN cargo build --release -p filehive-server
 
-# 第三阶段：极简运行环境 (仅 libc + ca-certificates + sqlite)
+# 第三阶段：极简运行环境 (仅 libc + ca-certificates + sqlite + tini)
 FROM debian:bookworm-slim
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata sqlite3 libssl3 wget curl \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata sqlite3 libssl3 wget curl tini \
     && rm -rf /var/lib/apt/lists/*
 
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && echo 'Asia/Shanghai' > /etc/timezone
@@ -33,4 +33,5 @@ ENV HOST="0.0.0.0" \
 
 EXPOSE 12345
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["filehive"]

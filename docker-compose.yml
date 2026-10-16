@@ -12,6 +12,8 @@ services:
     image: ${FILEHIVE_IMAGE:-ghcr.io/hugeww/filehive:latest}
     container_name: filehive
     restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 10s
     ports:
       # 宿主机端口由 .env 的 SERVER_PORT / BIND_HOST 控制；容器内固定监听 12345
       - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-12345}:12345"
