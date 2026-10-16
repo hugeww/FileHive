@@ -1,6 +1,8 @@
 use axum::{
+    body::Body,
     extract::{Query, State},
-    response::Json,
+    http::{header, StatusCode},
+    response::{Json, Response},
 };
 use chrono::{DateTime, Duration, Utc};
 use filehive_core::{
@@ -18,6 +20,8 @@ use filehive_security::{
     create_jwt_token, hash_password, is_password_hashed, validate_outbound_endpoint,
     validate_outbound_hostname, verify_jwt_token, verify_password,
 };
+use mime_guess::from_path;
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -992,3 +996,128 @@ pub async fn file_view_presets_delete_handler(
     let _ = delete_view_preset(&state.pool, &preset_id).await?;
     Ok(Json(APIResponse::success(json!({ "ok": true }))))
 }
+
+#[derive(Debug, Deserialize, Default)]
+pub struct AdminFileQuery {
+    pub id: i64,
+}
+
+pub async fn file_download_handler(
+    _auth: AdminAuth,
+    State(state): State<AppState>,
+    Query(query): Query<AdminFileQuery>,
+) -> Result<Response, AppError> {
+    let item = get_file_code_by_id(&state.pool, query.id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("文件不存在".to_string()))?;
+
+    if let Some(text) = &item.text {
+        if item.uuid_file_name.is_none() && item.file_path.as_deref().unwrap_or("").is_empty() {
+            let filename = format!("{}.txt", if item.suffix.is_empty() { &item.code } else { &item.suffix });
+            let encoded_filename = utf8_percent_encode(&filename, NON_ALPHANUMERIC).to_string();
+            let disposition = format!(
+                "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+                filename, encoded_filename
+            );
+
+            let data = text.as_bytes();
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                .header(header::CONTENT_DISPOSITION, disposition)
+                .header(header::CONTENT_LENGTH, data.len().to_string())
+                .body(Body::from(data.to_vec()))
+                .map_err(|e| AppError::Internal(e.to_string()));
+        }
+    }
+
+    let full_path = item.get_file_path();
+    if full_path.is_empty() {
+        return Err(AppError::NotFound("文件存储路径不存在".to_string()));
+    }
+
+    let data = state.storage.read_file(&full_path).await?;
+    let filename = if !item.suffix.is_empty() {
+        item.suffix.clone()
+    } else {
+        item.uuid_file_name.clone().unwrap_or_else(|| item.code.clone())
+    };
+
+    let mime_type = from_path(&filename)
+        .first_or_octet_stream()
+        .to_string();
+
+    let encoded_filename = utf8_percent_encode(&filename, NON_ALPHANUMERIC).to_string();
+    let disposition = format!(
+        "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+        filename, encoded_filename
+    );
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mime_type)
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .header(header::CONTENT_LENGTH, data.len().to_string())
+        .body(Body::from(data))
+        .map_err(|e| AppError::Internal(e.to_string()))
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct AdminFilePreviewQuery {
+    pub id: i64,
+    pub max_chars: Option<usize>,
+}
+
+pub async fn file_preview_handler(
+    _auth: AdminAuth,
+    State(state): State<AppState>,
+    Query(query): Query<AdminFilePreviewQuery>,
+) -> Result<Json<APIResponse<serde_json::Value>>, AppError> {
+    let item = get_file_code_by_id(&state.pool, query.id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("文件不存在".to_string()))?;
+
+    let max_chars = query.max_chars.unwrap_or(20000);
+
+    let content_string = if let Some(text) = &item.text {
+        text.clone()
+    } else {
+        let full_path = item.get_file_path();
+        if full_path.is_empty() {
+            String::new()
+        } else {
+            let data = state.storage.read_file(&full_path).await?;
+            String::from_utf8_lossy(&data).to_string()
+        }
+    };
+
+    let char_count = content_string.chars().count();
+    let truncated = char_count > max_chars;
+    let preview_text: String = if truncated {
+        content_string.chars().take(max_chars).collect()
+    } else {
+        content_string
+    };
+
+    let preview_len = preview_text.chars().count();
+    let filename = if !item.suffix.is_empty() {
+        item.suffix
+    } else {
+        item.code.clone()
+    };
+
+    Ok(Json(APIResponse::success(json!({
+        "id": item.id,
+        "code": item.code,
+        "name": filename,
+        "type": "text",
+        "content": preview_text,
+        "length": char_count,
+        "preview_length": preview_len,
+        "truncated": truncated,
+        "max_chars": max_chars,
+        "created_at": item.created_at,
+        "expired_at": item.expired_at,
+    }))))
+}
+

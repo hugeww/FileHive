@@ -31,6 +31,8 @@ pub fn admin_router() -> Router<AppState> {
             "/file/metadata",
             post(handlers::file_metadata_handler).patch(handlers::file_metadata_handler),
         )
+        .route("/file/download", get(handlers::file_download_handler))
+        .route("/file/preview", get(handlers::file_preview_handler))
         .route("/file/delete", delete(handlers::delete_file_handler))
         .route(
             "/file/batch-delete",
