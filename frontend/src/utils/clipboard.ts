@@ -36,33 +36,52 @@ export const copyToClipboard = async (
     }
   }
 
-  try {
-    // 优先使用 Clipboard API
-    if (document.hasFocus() && navigator.clipboard && navigator.clipboard.writeText) {
+  // 1. 优先尝试现代 Clipboard API（仅在受保护环境如 HTTPS/localhost 下且可用时）
+  if (navigator?.clipboard?.writeText) {
+    try {
       await navigator.clipboard.writeText(text)
       showCopyMessage(successMsg, 'success')
       return true
+    } catch {
+      // 若浏览器（如 Safari/无焦点窗口）拒绝权限，平滑降级到传统 textarea 方案
     }
-    // 后备方案：使用传统的复制方法
+  }
+
+  // 2. 传统兼容方案（针对 HTTP、iOS Safari、移动端 WebView 等环境）
+  try {
     const textarea = document.createElement('textarea')
     textarea.value = text
+    // 避免 iOS 屏幕弹跳与滚动
     textarea.style.position = 'fixed'
-    textarea.style.opacity = '0'
+    textarea.style.top = '0'
+    textarea.style.left = '0'
+    textarea.style.width = '2em'
+    textarea.style.height = '2em'
+    textarea.style.padding = '0'
+    textarea.style.border = 'none'
+    textarea.style.outline = 'none'
+    textarea.style.boxShadow = 'none'
+    textarea.style.background = 'transparent'
+    textarea.setAttribute('readonly', '')
+
     document.body.appendChild(textarea)
+    textarea.focus()
     textarea.select()
+    textarea.setSelectionRange(0, textarea.value.length)
+
     const success = document.execCommand('copy')
     document.body.removeChild(textarea)
+
     if (success) {
       showCopyMessage(successMsg, 'success')
       return true
-    } else {
-      throw new Error('execCommand copy failed')
     }
   } catch (err) {
-    console.error('复制失败:', err)
-    showCopyMessage(errorMsg, 'error')
-    return false
+    console.warn('execCommand copy fallback error:', err)
   }
+
+  showCopyMessage(errorMsg, 'error')
+  return false
 }
 
 /**
