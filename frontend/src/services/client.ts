@@ -33,6 +33,12 @@ const attachAuthToken = (config: InternalAxiosRequestConfig) => {
   } else {
     clearStoredToken()
   }
+
+  // 当入参是 FormData 时，删除默认的 application/json，让浏览器自动注入带有 boundary 的 multipart/form-data
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type']
+  }
+
   return config
 }
 
